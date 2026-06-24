@@ -1,0 +1,1551 @@
+import { useEffect, useMemo, useState, type ReactNode } from "react";
+import {
+  ArrowLeft,
+  Bell,
+  Check,
+  ChevronRight,
+  ClipboardList,
+  Download,
+  Home,
+  Leaf,
+  LibraryBig,
+  Pause,
+  Play,
+  RotateCcw,
+  ShieldCheck,
+  SkipForward,
+  Sparkles,
+  UserRound
+} from "lucide-react";
+import { exerciseCategories, exercises, type Exercise, type ExerciseIntensity, type ExerciseSpace } from "./data/exercises";
+import {
+  appendAbandonedSession,
+  appendSession,
+  loadAbandonedSessions,
+  loadPreferences,
+  loadSessions,
+  savePreferences
+} from "./storage";
+import {
+  createAbandonedSession,
+  createCompletedSession,
+  generateReplaySession,
+  generateSession,
+  generateSingleExerciseSession
+} from "./session";
+import type { AbandonedSession, AppView, CompletedSession, MovementMode, Preferences, Tab, TargetArea } from "./types";
+import {
+  averageCompletedSec,
+  calculateStreak,
+  exportActivityCsv,
+  exportActivityJson,
+  formatDuration,
+  totalCompletedSec,
+  todayTotalSec
+} from "./utils";
+import { copy } from "./copy";
+
+type PreferenceDraft = Pick<
+  Preferences,
+  "durationMin" | "sessionDurationSec" | "targetAreas" | "space" | "intensity" | "reminderFrequency"
+> & {
+  movementMode?: MovementMode;
+};
+
+const defaultDraft: PreferenceDraft = {
+  durationMin: 1,
+  sessionDurationSec: 60,
+  targetAreas: ["肩颈"],
+  space: "小空间",
+  intensity: "温和",
+  reminderFrequency: "暂不设置"
+};
+
+type OnboardingDraft = Omit<PreferenceDraft, "space" | "intensity" | "reminderFrequency"> & {
+  space: ExerciseSpace | null;
+  intensity: ExerciseIntensity | null;
+};
+
+const onboardingDraft: OnboardingDraft = {
+  durationMin: 1,
+  sessionDurationSec: 60,
+  targetAreas: [],
+  space: null,
+  intensity: null
+};
+
+const durationOptions = [30, 60, 90, 120, 150, 180];
+const targetAreaOptions: Array<{ value: TargetArea; label: string; emoji: string }> = [
+  { value: "肩颈", label: "肩颈", emoji: "💻" },
+  { value: "背部与腰部", label: "腰背", emoji: "🪑" }
+];
+const onboardingIllustrations = [
+  "/assets/ip/ip-1.png",
+  "/assets/ip/ip-2.png",
+  "/assets/ip/ip-3.png",
+  "/assets/ip/ip-4.png"
+];
+function areaLabel(area: string) {
+  return targetAreaOptions.find((item) => item.value === area)?.label ?? area;
+}
+
+function areaLabels(areas: string[]) {
+  return areas.map(areaLabel);
+}
+
+function reminderDelayMs(reminderFrequency: Preferences["reminderFrequency"]) {
+  const match = reminderFrequency.match(/\d+/);
+  if (!match || reminderFrequency.includes("暂不")) return null;
+  return Number(match[0]) * 60 * 1000;
+}
+
+function cn(...classes: Array<string | false | null | undefined>) {
+  return classes.filter(Boolean).join(" ");
+}
+
+function preferenceSummary(
+  preferences: Pick<Preferences, "sessionDurationSec" | "targetAreas" | "space" | "intensity">
+) {
+  return copy.common.preferenceSummary(
+    preferences.sessionDurationSec,
+    areaLabels(preferences.targetAreas),
+    preferences.space,
+    preferences.intensity
+  );
+}
+
+function fullPreferenceSummary(preferences: Preferences) {
+  return preferenceSummary(preferences);
+}
+
+function recentCompletedExerciseIds(sessions: CompletedSession[], limit = 3) {
+  return [...sessions]
+    .sort((a, b) => b.completedAt.localeCompare(a.completedAt))
+    .flatMap((session) => session.exerciseIds)
+    .slice(0, limit);
+}
+
+function formatSafetyTips(tips: string[]) {
+  const text = tips
+    .map((tip) => tip.trim().replace(/[。；;]+$/u, ""))
+    .filter(Boolean)
+    .join("；");
+  return text ? `${text}。` : "";
+}
+
+function App() {
+  const [preferences, setPreferences] = useState<Preferences | null>(() => loadPreferences());
+  const [sessions, setSessions] = useState<CompletedSession[]>(() => loadSessions());
+  const [abandonedSessions, setAbandonedSessions] = useState<AbandonedSession[]>(() =>
+    loadAbandonedSessions()
+  );
+  const [activeTab, setActiveTab] = useState<Tab>("home");
+  const [view, setView] = useState<AppView>(() =>
+    loadPreferences() ? { name: "home" } : { name: "onboarding" }
+  );
+  const [reminderVisible, setReminderVisible] = useState(false);
+  const [reminderMutedToday, setReminderMutedToday] = useState(false);
+
+  const todaySec = todayTotalSec(sessions);
+  const streak = calculateStreak(sessions);
+  const recentExerciseIds = useMemo(() => recentCompletedExerciseIds(sessions), [sessions]);
+
+  function persistPreferences(draft: PreferenceDraft, returnTo: "home" | "profile" = "home") {
+    const { movementMode: _movementMode, ...preferenceValues } = draft;
+    const next: Preferences = {
+      ...preferenceValues,
+      durationMin: draft.sessionDurationSec / 60,
+      updatedAt: new Date().toISOString()
+    };
+    savePreferences(next);
+    setPreferences(next);
+    setActiveTab(returnTo);
+    setView({ name: "home" });
+  }
+
+  function startFromPreferences(mode?: MovementMode) {
+    if (!preferences) return;
+    const spaceOverride: ExerciseSpace =
+      mode === "seated"
+        ? "小空间"
+        : preferences.space === "小空间"
+          ? "中空间"
+          : preferences.space;
+    const modePreferences = mode
+      ? {
+          ...preferences,
+          movementMode: mode,
+          space: spaceOverride,
+          recentExerciseIds
+        }
+      : {
+          ...preferences,
+          recentExerciseIds
+        };
+    setReminderVisible(false);
+    setView({ name: "player", session: generateSession(modePreferences) });
+  }
+
+  function startTemporary(draft: PreferenceDraft) {
+    const plan = generateSession({
+      ...draft,
+      movementMode: draft.movementMode ?? "seated",
+      recentExerciseIds
+    });
+    setView({ name: "player", session: { ...plan, source: "temporary" } });
+  }
+
+  function completeSession(plan: AppView & { name: "player" }, actualCompletedSec: number) {
+    const completed = createCompletedSession(plan.session, actualCompletedSec);
+    if (plan.session.source === "single") {
+      setView({ name: "completion", session: completed, mode: "single" });
+      return;
+    }
+    if (plan.session.source === "replay") {
+      setView({ name: "completion", session: completed, mode: "replay" });
+      return;
+    }
+    setSessions(appendSession(completed));
+    setView({
+      name: "completion",
+      session: completed,
+      mode: "regular",
+      movementMode: plan.session.preferences.movementMode
+    });
+  }
+
+  function abandonSession(
+    plan: AppView & { name: "player" },
+    actualCompletedSec: number,
+    currentExerciseIndex: number
+  ) {
+    if (plan.session.source !== "single") {
+      const abandoned = createAbandonedSession(
+        plan.session,
+        actualCompletedSec,
+        currentExerciseIndex
+      );
+      setAbandonedSessions(appendAbandonedSession(abandoned));
+    }
+    setView({ name: "home" });
+  }
+
+  function updateReminder(reminderFrequency: Preferences["reminderFrequency"]) {
+    if (!preferences) return;
+    const next = {
+      ...preferences,
+      reminderFrequency,
+      updatedAt: new Date().toISOString()
+    };
+    savePreferences(next);
+    setPreferences(next);
+    setReminderMutedToday(false);
+    setReminderVisible(false);
+  }
+
+  function remindLater() {
+    updateReminder("30分钟后");
+  }
+
+  useEffect(() => {
+    if (!preferences || reminderMutedToday || view.name === "onboarding") return undefined;
+    const delay = reminderDelayMs(preferences.reminderFrequency);
+    if (!delay) return undefined;
+    const timer = window.setTimeout(() => {
+      setReminderVisible(true);
+      if (typeof Notification !== "undefined" && Notification.permission === "granted") {
+        new Notification("该松一下了。", {
+          body: "刚好停一下，做一组 30 秒动作。"
+        });
+      }
+    }, delay);
+    return () => window.clearTimeout(timer);
+  }, [preferences, reminderMutedToday, view.name]);
+
+  if (view.name === "onboarding") {
+    return (
+      <Shell hideNav>
+        <Onboarding onSubmit={(draft) => persistPreferences(draft, "home")} />
+      </Shell>
+    );
+  }
+
+  if (!preferences) {
+    return null;
+  }
+
+  if (view.name === "player") {
+    return (
+      <Shell hideNav>
+        <ExercisePlayer
+          session={view}
+          onComplete={(actualCompletedSec) => completeSession(view, actualCompletedSec)}
+          onExit={(actualCompletedSec, currentExerciseIndex) =>
+            abandonSession(view, actualCompletedSec, currentExerciseIndex)
+          }
+        />
+      </Shell>
+    );
+  }
+
+  if (view.name === "completion") {
+    return (
+      <Shell hideNav>
+        <Completion
+          session={view.session}
+          sessions={sessions}
+          mode={view.mode}
+          onHome={() => {
+            setActiveTab(view.mode === "single" ? "library" : "home");
+            setView({ name: "home" });
+          }}
+          onAgain={() => {
+            if (view.mode === "single") {
+              setActiveTab("library");
+              setView({ name: "home" });
+              return;
+            }
+            if (view.mode === "replay") {
+              setActiveTab("profile");
+              setView({ name: "home" });
+              return;
+            }
+            startFromPreferences(view.movementMode);
+          }}
+        />
+      </Shell>
+    );
+  }
+
+  if (view.name === "temporary") {
+    return (
+      <Shell hideNav>
+        <PreferenceScreen
+          title={copy.preferences.temporaryTitle}
+          subtitle={copy.preferences.temporarySubtitle}
+          initial={preferences}
+          submitLabel={copy.preferences.temporarySubmit}
+          includeMovementMode
+          onBack={() => setView({ name: "home" })}
+          onSubmit={startTemporary}
+        />
+      </Shell>
+    );
+  }
+
+  if (view.name === "edit-preferences") {
+    return (
+      <Shell hideNav>
+        <PreferenceScreen
+          title={copy.preferences.editTitle}
+          subtitle={copy.preferences.editSubtitle}
+          initial={preferences}
+          submitLabel={copy.preferences.editSubmit}
+          includeMovementMode={false}
+          onBack={() => {
+            setActiveTab(view.returnTo);
+            setView({ name: "home" });
+          }}
+          onSubmit={(draft) => persistPreferences(draft, view.returnTo)}
+        />
+      </Shell>
+    );
+  }
+
+  return (
+    <Shell activeTab={activeTab} onTabChange={setActiveTab}>
+      {activeTab === "home" && (
+        <HomeScreen
+          preferences={preferences}
+          todaySec={todaySec}
+          streak={streak}
+          onStart={startFromPreferences}
+          onTemporary={() => setView({ name: "temporary" })}
+        />
+      )}
+      {activeTab === "library" && (
+        <LibraryScreen
+          onTry={(exercise) =>
+            setView({ name: "player", session: generateSingleExerciseSession(exercise) })
+          }
+        />
+      )}
+      {activeTab === "profile" && (
+        <ProfileScreen
+          preferences={preferences}
+          sessions={sessions}
+          abandonedSessions={abandonedSessions}
+          todaySec={todaySec}
+          streak={streak}
+          onEdit={() => setView({ name: "edit-preferences", returnTo: "profile" })}
+          onReplay={(exerciseIds, targetAreas, plannedDurationSec) =>
+            setView({
+              name: "player",
+              session: generateReplaySession(exerciseIds, targetAreas, plannedDurationSec)
+            })
+          }
+        />
+      )}
+      {reminderVisible && (
+        <ReminderDialog
+          onStart={() => startFromPreferences()}
+          onLater={remindLater}
+          onMuteToday={() => {
+            setReminderVisible(false);
+            setReminderMutedToday(true);
+          }}
+        />
+      )}
+    </Shell>
+  );
+}
+
+function Shell({
+  children,
+  activeTab,
+  onTabChange,
+  hideNav = false
+}: {
+  children: ReactNode;
+  activeTab?: Tab;
+  onTabChange?: (tab: Tab) => void;
+  hideNav?: boolean;
+}) {
+  return (
+    <div className="min-h-svh bg-paper text-ink">
+      <main className={cn("mx-auto min-h-svh w-full max-w-md px-5", hideNav ? "py-3" : "pb-28 pt-5")}>
+        {children}
+      </main>
+      {!hideNav && activeTab && onTabChange && (
+        <nav className="fixed inset-x-0 bottom-0 z-20 border-t border-black/5 bg-paper/90 px-4 py-3 backdrop-blur">
+          <div className="mx-auto grid max-w-md grid-cols-3 gap-2 rounded-full bg-white/70 p-1 shadow-soft">
+            <TabButton icon={<Home size={18} />} label={copy.tabs.home} active={activeTab === "home"} onClick={() => onTabChange("home")} />
+            <TabButton icon={<LibraryBig size={18} />} label={copy.tabs.library} active={activeTab === "library"} onClick={() => onTabChange("library")} />
+            <TabButton icon={<UserRound size={18} />} label={copy.tabs.profile} active={activeTab === "profile"} onClick={() => onTabChange("profile")} />
+          </div>
+        </nav>
+      )}
+    </div>
+  );
+}
+
+function TabButton({
+  icon,
+  label,
+  active,
+  onClick
+}: {
+  icon: ReactNode;
+  label: string;
+  active: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      className={cn(
+        "flex h-12 items-center justify-center gap-1.5 rounded-full text-sm transition",
+        active ? "bg-leaf text-white shadow-sm" : "text-muted hover:bg-moss/60"
+      )}
+      onClick={onClick}
+      type="button"
+    >
+      {icon}
+      <span>{label}</span>
+    </button>
+  );
+}
+
+function Onboarding({ onSubmit }: { onSubmit: (draft: PreferenceDraft) => void }) {
+  const [step, setStep] = useState(0);
+  const [draft, setDraft] = useState<OnboardingDraft>(onboardingDraft);
+  const totalSteps = 4;
+  const progressPercent = ((step + 1) / totalSteps) * 100;
+  const needsConfirm = step === 0;
+  const canContinueAreas = draft.targetAreas.length > 0;
+  const showFooterPrimary = needsConfirm || step === 1;
+  const illustration = onboardingIllustrations[step];
+
+  function completeDraft(nextDraft = draft): PreferenceDraft {
+    return {
+      ...nextDraft,
+      space: nextDraft.space ?? "小空间",
+      intensity: nextDraft.intensity ?? "温和",
+      reminderFrequency: "暂不设置"
+    };
+  }
+
+  function goBack() {
+    setStep((current) => Math.max(0, current - 1));
+  }
+
+  function goNext(nextDraft = draft) {
+    if (step >= totalSteps - 1) {
+      onSubmit(completeDraft(nextDraft));
+      return;
+    }
+    setStep((current) => Math.min(totalSteps - 1, current + 1));
+  }
+
+  function choose(nextDraft: OnboardingDraft) {
+    setDraft(nextDraft);
+    goNext(nextDraft);
+  }
+
+  function toggleArea(area: TargetArea) {
+    setDraft((current) => {
+      const exists = current.targetAreas.includes(area);
+      const next = exists
+        ? current.targetAreas.filter((item) => item !== area)
+        : [...current.targetAreas, area];
+      return { ...current, targetAreas: next };
+    });
+  }
+
+  return (
+    <div className="flex min-h-[calc(100svh-40px)] animate-rise flex-col pb-40 pt-3">
+      <div className="space-y-4">
+        <div className="flex items-center justify-between gap-4">
+          <p className="text-lg font-semibold text-leaf">{copy.onboarding.eyebrow}</p>
+          <span className="rounded-full bg-moss px-3 py-1 text-sm font-semibold text-leaf">
+            {copy.onboarding.progressLabel(step + 1, totalSteps)}
+          </span>
+        </div>
+        <div className="h-2 overflow-hidden rounded-full bg-white">
+          <div
+            className="h-full rounded-full bg-leaf transition-all duration-300"
+            style={{ width: `${progressPercent}%` }}
+          />
+        </div>
+        <div className={step === 0 ? "relative min-h-[184px]" : "flex justify-end pt-8"}>
+          {step === 0 ? (
+            <>
+              <div className="relative z-10">
+                <h1 className="whitespace-nowrap text-[34px] font-semibold leading-tight tracking-normal">
+                  {copy.onboarding.title}
+                </h1>
+                <p className="mt-3 max-w-[230px] text-base leading-7 text-muted">
+                  {copy.onboarding.subtitle}
+                </p>
+              </div>
+              <img
+                alt=""
+                aria-hidden="true"
+                className="animate-float pointer-events-none absolute right-0 top-[86px] h-24 w-24 rounded-[8px] object-cover shadow-soft"
+                src={illustration}
+              />
+            </>
+          ) : (
+            <img
+              alt=""
+              aria-hidden="true"
+              className="animate-float pointer-events-none h-24 w-24 shrink-0 rounded-[8px] object-cover shadow-soft"
+              src={illustration}
+            />
+          )}
+        </div>
+      </div>
+
+      <div className="mt-5 flex-1">
+        {step === 0 && (
+          <Section title={copy.preferences.durationTitle} helper={copy.preferences.durationHelper}>
+            <div className="rounded-[8px] bg-white/75 p-4 shadow-soft">
+              <div className="mb-3 flex items-end justify-between">
+                <span className="text-base font-semibold text-muted">⏱️ {copy.preferences.durationLabel}</span>
+                <strong className="text-3xl font-semibold text-leaf">
+                  {copy.common.durationSec(draft.sessionDurationSec)}
+                </strong>
+              </div>
+              <input
+                className="w-full accent-leaf"
+                max={durationOptions.length - 1}
+                min={0}
+                onChange={(event) =>
+                  setDraft((current) => ({
+                    ...current,
+                    durationMin: durationOptions[Number(event.target.value)] / 60,
+                    sessionDurationSec: durationOptions[Number(event.target.value)]
+                  }))
+                }
+                step={1}
+                type="range"
+                value={durationOptions.indexOf(draft.sessionDurationSec)}
+              />
+              <div className="mt-2 flex justify-between text-xs text-muted">
+                <span>{copy.preferences.durationMinLabel}</span>
+                <span>{copy.preferences.durationMaxLabel}</span>
+              </div>
+            </div>
+          </Section>
+        )}
+
+        {step === 1 && (
+          <section className="space-y-3">
+            <h2 className="whitespace-nowrap text-[27px] font-semibold tracking-normal">
+              {copy.preferences.targetAreasTitle}
+            </h2>
+            <div className="space-y-2">
+              {targetAreaOptions.map((area) => (
+                <OptionButton
+                  key={area.value}
+                  active={draft.targetAreas.includes(area.value)}
+                  emoji={area.emoji}
+                  label={area.label}
+                  onClick={() => toggleArea(area.value)}
+                />
+              ))}
+            </div>
+          </section>
+        )}
+
+        {step === 2 && (
+          <Section title={copy.preferences.spaceTitle}>
+            <div className="space-y-2">
+              <OptionButton
+                active={draft.space === "小空间"}
+                emoji="🪑"
+                label={copy.preferences.spaceSmall}
+                description={copy.preferences.spaceSmallDescription}
+                onClick={() => choose({ ...draft, space: "小空间" })}
+              />
+              <OptionButton
+                active={draft.space === "中空间"}
+                emoji="🧍"
+                label={copy.preferences.spaceMedium}
+                description={copy.preferences.spaceMediumDescription}
+                onClick={() => choose({ ...draft, space: "中空间" })}
+              />
+              <OptionButton
+                active={draft.space === "大空间"}
+                emoji="🚶"
+                label={copy.preferences.spaceLarge}
+                description={copy.preferences.spaceLargeDescription}
+                onClick={() => choose({ ...draft, space: "大空间" })}
+              />
+            </div>
+          </Section>
+        )}
+
+        {step === 3 && (
+          <Section title={copy.preferences.intensityTitle}>
+            <div className="space-y-2">
+              <OptionButton
+                active={draft.intensity === "温和"}
+                emoji="🍃"
+                label={copy.preferences.intensityGentle}
+                description={copy.preferences.intensityGentleDescription}
+                onClick={() => choose({ ...draft, intensity: "温和" })}
+              />
+              <OptionButton
+                active={draft.intensity === "中等"}
+                emoji="⚡"
+                label={copy.preferences.intensityMedium}
+                description={copy.preferences.intensityMediumDescription}
+                onClick={() => choose({ ...draft, intensity: "中等" })}
+              />
+            </div>
+          </Section>
+        )}
+
+      </div>
+
+      <div className="fixed inset-x-0 bottom-0 z-20 border-t border-black/5 bg-paper/95 px-5 py-4 backdrop-blur">
+        <div className="mx-auto grid max-w-md gap-3">
+          <button
+            className="min-h-14 w-full rounded-full bg-white/75 px-6 py-4 text-base font-semibold text-ink disabled:text-muted"
+            disabled={step === 0}
+            onClick={goBack}
+            type="button"
+          >
+            {copy.common.back}
+          </button>
+          {showFooterPrimary ? (
+            <button
+              className="min-h-14 w-full rounded-full bg-leaf px-4 py-3 text-base font-semibold text-white shadow-soft disabled:bg-muted/30 disabled:text-muted"
+              disabled={step === 1 && !canContinueAreas}
+              onClick={() => goNext()}
+              type="button"
+            >
+              {needsConfirm
+                ? copy.onboarding.durationAction(draft.sessionDurationSec)
+                : copy.onboarding.targetAreasAction}
+            </button>
+          ) : (
+            null
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PreferenceScreen({
+  title,
+  subtitle,
+  initial,
+  submitLabel,
+  includeMovementMode,
+  onBack,
+  onSubmit
+}: {
+  title: string;
+  subtitle: string;
+  initial: PreferenceDraft;
+  submitLabel: string;
+  includeMovementMode: boolean;
+  onBack: () => void;
+  onSubmit: (draft: PreferenceDraft) => void;
+}) {
+  return (
+    <div className="animate-rise space-y-6 pb-8">
+      <button
+        className="inline-flex min-h-12 min-w-36 items-center justify-center gap-2 rounded-full bg-white/75 px-6 py-3 text-base font-semibold text-muted shadow-sm"
+        onClick={onBack}
+        type="button"
+      >
+        <ArrowLeft size={18} />
+        {copy.common.back}
+      </button>
+      <div className="space-y-2">
+        <h1 className="text-3xl font-semibold tracking-normal">{title}</h1>
+        <p className="text-sm leading-6 text-muted">{subtitle}</p>
+      </div>
+      <PreferenceForm
+        initial={initial}
+        includeMovementMode={includeMovementMode}
+        submitLabel={submitLabel}
+        onSubmit={onSubmit}
+      />
+    </div>
+  );
+}
+
+function PreferenceForm({
+  initial,
+  includeMovementMode,
+  submitLabel,
+  onSubmit
+}: {
+  initial: PreferenceDraft;
+  includeMovementMode: boolean;
+  submitLabel: string;
+  onSubmit: (draft: PreferenceDraft) => void;
+}) {
+  const [draft, setDraft] = useState<PreferenceDraft>({
+    ...defaultDraft,
+    ...initial,
+    durationMin: initial.sessionDurationSec / 60,
+    targetAreas: initial.targetAreas.length ? initial.targetAreas : ["肩颈"],
+    movementMode: initial.movementMode ?? (initial.space === "小空间" ? "seated" : "standing")
+  });
+  const canSubmit = draft.targetAreas.length > 0 && (!includeMovementMode || Boolean(draft.movementMode));
+
+  function toggleArea(area: TargetArea) {
+    setDraft((current) => {
+      const exists = current.targetAreas.includes(area);
+      const next = exists
+        ? current.targetAreas.filter((item) => item !== area)
+        : [...current.targetAreas, area];
+      return { ...current, targetAreas: next };
+    });
+  }
+
+  return (
+    <form
+      className="space-y-6"
+      onSubmit={(event) => {
+        event.preventDefault();
+        onSubmit(draft);
+      }}
+    >
+      <Section title={copy.preferences.durationTitle} helper={copy.preferences.durationHelper}>
+        <div className="rounded-[8px] bg-white/75 p-4 shadow-soft">
+          <div className="mb-3 flex items-end justify-between">
+            <span className="text-sm text-muted">{copy.preferences.durationLabel}</span>
+            <strong className="text-3xl font-semibold text-leaf">
+              {copy.common.durationSec(draft.sessionDurationSec)}
+            </strong>
+          </div>
+          <input
+            className="w-full accent-leaf"
+            max={durationOptions.length - 1}
+            min={0}
+            onChange={(event) =>
+              setDraft((current) => ({
+                ...current,
+                durationMin: durationOptions[Number(event.target.value)] / 60,
+                sessionDurationSec: durationOptions[Number(event.target.value)]
+              }))
+            }
+            step={1}
+            type="range"
+            value={durationOptions.indexOf(draft.sessionDurationSec)}
+          />
+          <div className="mt-2 flex justify-between text-xs text-muted">
+            <span>{copy.preferences.durationMinLabel}</span>
+            <span>{copy.preferences.durationMaxLabel}</span>
+          </div>
+        </div>
+      </Section>
+
+      <Section title={copy.preferences.targetAreasTitle}>
+        <div className="space-y-2">
+          {targetAreaOptions.map((area) => (
+            <OptionButton
+              key={area.value}
+              active={draft.targetAreas.includes(area.value)}
+              label={area.label}
+              onClick={() => toggleArea(area.value)}
+            />
+          ))}
+        </div>
+      </Section>
+
+      <Section title={copy.preferences.spaceTitle}>
+        <div className="space-y-2">
+          <OptionButton
+            active={draft.space === "小空间"}
+            label={copy.preferences.spaceSmall}
+            description={copy.preferences.spaceSmallDescription}
+            onClick={() => setDraft((current) => ({ ...current, space: "小空间" }))}
+          />
+          <OptionButton
+            active={draft.space === "中空间"}
+            label={copy.preferences.spaceMedium}
+            description={copy.preferences.spaceMediumDescription}
+            onClick={() => setDraft((current) => ({ ...current, space: "中空间" }))}
+          />
+          <OptionButton
+            active={draft.space === "大空间"}
+            label={copy.preferences.spaceLarge}
+            description={copy.preferences.spaceLargeDescription}
+            onClick={() => setDraft((current) => ({ ...current, space: "大空间" }))}
+          />
+        </div>
+      </Section>
+
+      <Section title={copy.preferences.intensityTitle}>
+        <div className="space-y-2">
+          <OptionButton
+            active={draft.intensity === "温和"}
+            label={copy.preferences.intensityGentle}
+            description={copy.preferences.intensityGentleDescription}
+            onClick={() => setDraft((current) => ({ ...current, intensity: "温和" }))}
+          />
+          <OptionButton
+            active={draft.intensity === "中等"}
+            label={copy.preferences.intensityMedium}
+            description={copy.preferences.intensityMediumDescription}
+            onClick={() => setDraft((current) => ({ ...current, intensity: "中等" }))}
+          />
+        </div>
+      </Section>
+
+      {includeMovementMode && (
+        <Section title={copy.preferences.movementModeTitle}>
+          <div className="grid grid-cols-2 gap-2">
+            <OptionButton
+              active={draft.movementMode === "seated"}
+              label={copy.home.startSeated}
+              onClick={() => setDraft((current) => ({ ...current, movementMode: "seated" }))}
+            />
+            <OptionButton
+              active={draft.movementMode === "standing"}
+              label={copy.home.startStanding}
+              onClick={() => setDraft((current) => ({ ...current, movementMode: "standing" }))}
+            />
+          </div>
+        </Section>
+      )}
+
+      <button
+        className="h-13 w-full rounded-full bg-leaf px-5 py-4 font-semibold text-white shadow-soft transition hover:translate-y-[-1px] disabled:bg-muted/30 disabled:text-muted"
+        disabled={!canSubmit}
+        type="submit"
+      >
+        {submitLabel}
+      </button>
+    </form>
+  );
+}
+
+function Section({
+  title,
+  helper,
+  children
+}: {
+  title: string;
+  helper?: string;
+  children: ReactNode;
+}) {
+  return (
+    <section className="space-y-3">
+      <div>
+        <h2 className="text-2xl font-semibold tracking-normal">{title}</h2>
+        {helper && <p className="mt-1 text-sm leading-6 text-muted">{helper}</p>}
+      </div>
+      {children}
+    </section>
+  );
+}
+
+function OptionButton({
+  active,
+  emoji,
+  label,
+  description,
+  onClick
+}: {
+  active: boolean;
+  emoji?: string;
+  label: string;
+  description?: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      className={cn(
+        "flex min-h-14 w-full items-center justify-between gap-3 rounded-[8px] border px-4 py-3 text-left transition",
+        active
+          ? "border-leaf bg-moss text-ink"
+          : "border-black/5 bg-white/70 text-ink hover:border-leaf/40"
+      )}
+      onClick={onClick}
+      type="button"
+    >
+      <span>
+        <span className="block text-base font-semibold">
+          {emoji && <span className="mr-2" aria-hidden="true">{emoji}</span>}
+          {label}
+        </span>
+        {description && <span className="mt-1 block text-xs leading-5 text-muted">{description}</span>}
+      </span>
+      {active && <Check className="shrink-0 text-leaf" size={18} />}
+    </button>
+  );
+}
+
+function HomeScreen({
+  preferences,
+  todaySec,
+  streak,
+  onStart,
+  onTemporary
+}: {
+  preferences: Preferences;
+  todaySec: number;
+  streak: number;
+  onStart: (mode?: MovementMode) => void;
+  onTemporary: () => void;
+}) {
+  return (
+    <div className="animate-rise space-y-6">
+      <header className="flex items-center justify-between">
+        <div>
+          <h1 className="text-3xl font-semibold tracking-normal text-leaf">{copy.app.name}</h1>
+        </div>
+        <div className="rounded-full bg-sun/70 px-3 py-1 text-xs text-ink">
+          {copy.home.todayPrefix} {formatDuration(todaySec)}
+        </div>
+      </header>
+
+      <section className="overflow-hidden rounded-[8px] bg-white shadow-soft">
+        <div className="relative min-h-[230px] bg-moss px-5 py-6">
+          <div className="absolute right-4 top-4 h-24 w-24 rounded-full border border-white/60" />
+          <div className="absolute bottom-5 right-7 h-28 w-16 rounded-full bg-paper/70" />
+          <div className="relative max-w-[280px] space-y-3">
+            <div className="inline-flex items-center gap-1 rounded-full bg-white/75 px-3 py-1 text-xs text-leaf">
+              <Sparkles size={14} />
+              {copy.home.eyebrow}
+            </div>
+            <h2 className="text-4xl font-semibold leading-tight tracking-normal">{copy.home.heroTitle}</h2>
+            <p className="text-sm leading-6 text-ink/70">{copy.home.heroSubtitle}</p>
+          </div>
+        </div>
+        <div className="space-y-4 p-5">
+          <section className="grid grid-cols-2 gap-3">
+            <Stat label={copy.home.todayTotal} value={formatDuration(todaySec)} />
+            <Stat label={copy.home.streak} value={copy.common.days(streak)} />
+          </section>
+          <p className="rounded-[8px] bg-paper px-4 py-3 text-sm leading-6 text-ink/80">
+            {copy.home.recommendationPrefix}{preferenceSummary(preferences)}
+          </p>
+          <div className="grid grid-cols-2 gap-3">
+            <button
+              className="min-h-32 rounded-[8px] bg-leaf px-4 py-4 text-left text-white shadow-soft transition hover:translate-y-[-1px]"
+              onClick={() => onStart("seated")}
+              type="button"
+            >
+              <span className="block text-lg font-semibold">{copy.home.startSeated}</span>
+              <span className="mt-1 block text-sm leading-6 text-white/80">{copy.home.seatedDescription}</span>
+            </button>
+            <button
+              className="min-h-32 rounded-[8px] bg-moss px-4 py-4 text-left text-ink transition hover:translate-y-[-1px]"
+              onClick={() => onStart("standing")}
+              type="button"
+            >
+              <span className="block text-lg font-semibold">{copy.home.startStanding}</span>
+              <span className="mt-1 block text-sm leading-6 text-ink/65">{copy.home.standingDescription}</span>
+            </button>
+            <button className="col-span-2 rounded-full bg-white/80 px-5 py-4 text-base font-semibold text-ink shadow-sm" onClick={onTemporary} type="button">
+              {copy.home.temporary}
+            </button>
+          </div>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function ReminderDialog({
+  onStart,
+  onLater,
+  onMuteToday
+}: {
+  onStart: () => void;
+  onLater: () => void;
+  onMuteToday: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-30 grid place-items-end bg-ink/25 px-5 py-6 backdrop-blur-sm sm:place-items-center">
+      <section className="w-full max-w-md animate-rise rounded-[8px] bg-paper p-5 shadow-soft">
+        <div className="flex items-start gap-3">
+          <div className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-moss text-leaf">
+            <Bell size={20} />
+          </div>
+          <div>
+            <p className="text-sm font-medium text-leaf">提醒闹钟</p>
+            <h2 className="mt-1 text-2xl font-semibold tracking-normal">坐太久了，换个档。</h2>
+            <p className="mt-2 text-sm leading-6 text-muted">
+              刚好停一下，做一组 30 秒动作。起来前后都行，先动一下。
+            </p>
+          </div>
+        </div>
+        <div className="mt-5 grid gap-3">
+          <button className="rounded-full bg-leaf px-5 py-4 font-semibold text-white shadow-soft" onClick={onStart} type="button">
+            开始
+          </button>
+          <div className="grid grid-cols-2 gap-3">
+            <button className="rounded-full bg-moss px-4 py-3 text-sm font-semibold text-ink" onClick={onLater} type="button">
+              稍后提醒
+            </button>
+            <button className="rounded-full bg-white/80 px-4 py-3 text-sm font-semibold text-muted" onClick={onMuteToday} type="button">
+              今天先不提醒
+            </button>
+          </div>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function Stat({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-[8px] bg-white/75 p-4 shadow-soft">
+      <p className="text-xs text-muted">{label}</p>
+      <p className="mt-2 text-xl font-semibold">{value}</p>
+    </div>
+  );
+}
+
+function ExercisePlayer({
+  session,
+  onComplete,
+  onExit
+}: {
+  session: AppView & { name: "player" };
+  onComplete: (actualCompletedSec: number) => void;
+  onExit: (actualCompletedSec: number, currentExerciseIndex: number) => void;
+}) {
+  const [index, setIndex] = useState(0);
+  const [remainingSec, setRemainingSec] = useState(() => session.session.exercises[0]?.duration ?? 30);
+  const [running, setRunning] = useState(true);
+  const [actualCompletedSec, setActualCompletedSec] = useState(0);
+  const [finished, setFinished] = useState(false);
+  const current = session.session.exercises[index];
+  const total = session.session.exercises.length;
+  const exerciseDurationSec = current.duration;
+  const footerCue =
+    current.category === "肩颈"
+      ? "每天几分钟，轻松呵护颈肩"
+      : "每天几分钟，轻松呵护腰背";
+
+  useEffect(() => {
+    if (!running || finished) return undefined;
+    const timer = window.setInterval(() => {
+      setRemainingSec((currentRemaining) => {
+        const nextRemaining = currentRemaining - 1;
+        setActualCompletedSec((currentActual) => {
+          const nextActual = currentActual + 1;
+          if (nextRemaining <= 0 && index >= total - 1) {
+            setFinished(true);
+            setRunning(false);
+            window.setTimeout(() => onComplete(nextActual), 0);
+          }
+          return nextActual;
+        });
+
+        if (nextRemaining <= 0) {
+          if (index < total - 1) {
+            window.setTimeout(() => {
+              const nextExercise = session.session.exercises[index + 1];
+              setIndex((currentIndex) => Math.min(currentIndex + 1, total - 1));
+              setRemainingSec(nextExercise?.duration ?? 30);
+            }, 0);
+          }
+          return current.duration;
+        }
+        return nextRemaining;
+      });
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [current.duration, finished, index, onComplete, running, session.session.exercises, total]);
+
+  function exitToHome() {
+    setRunning(false);
+    onExit(actualCompletedSec, index);
+  }
+
+  function previous() {
+    if (index <= 0) return;
+    const previousExercise = session.session.exercises[index - 1];
+    setIndex((currentIndex) => Math.max(currentIndex - 1, 0));
+    setRemainingSec(previousExercise?.duration ?? 30);
+    setRunning(true);
+  }
+
+  function skip() {
+    if (index >= total - 1) {
+      setFinished(true);
+      setRunning(false);
+      onComplete(actualCompletedSec);
+      return;
+    }
+    const nextExercise = session.session.exercises[index + 1];
+    setIndex((currentIndex) => currentIndex + 1);
+    setRemainingSec(nextExercise?.duration ?? 30);
+    setRunning(true);
+  }
+
+  function restart() {
+    setRemainingSec(exerciseDurationSec);
+    setRunning(true);
+  }
+
+  const progressPercent = ((exerciseDurationSec - remainingSec) / exerciseDurationSec) * 100;
+
+  return (
+    <div className="flex min-h-[calc(100svh-24px)] animate-rise flex-col gap-2 pb-[calc(env(safe-area-inset-bottom)+0.35rem)]">
+      <header className="flex items-center justify-between pb-0.5">
+        <button
+          className="inline-flex min-h-9 items-center justify-center gap-1.5 rounded-full px-1 py-1 text-sm font-semibold text-ink"
+          onClick={exitToHome}
+          type="button"
+        >
+          <ArrowLeft size={18} />
+          {copy.common.backHome}
+        </button>
+        <span className="rounded-full bg-moss px-3 py-1 text-xs font-semibold text-leaf">
+          {copy.player.progress(index + 1, total)}
+        </span>
+      </header>
+
+      <ExerciseImage exercise={current} large />
+
+      <section className="space-y-1">
+        <div className="flex items-end justify-between gap-3">
+          <div className="min-w-0">
+            <p className="text-[12px] leading-4 text-muted">{areaLabel(current.category)} · {current.posture}</p>
+            <h1 className="text-[24px] font-semibold leading-[1.1] tracking-normal">{current.name}</h1>
+          </div>
+          <div className="shrink-0 text-right">
+            <p className="text-[40px] font-semibold leading-none tabular-nums text-leaf">{remainingSec}</p>
+            <p className="text-xs text-muted">{copy.common.seconds}</p>
+          </div>
+        </div>
+        <div className="h-1.5 overflow-hidden rounded-full bg-white">
+          <div className="h-full rounded-full bg-leaf transition-all duration-500" style={{ width: `${progressPercent}%` }} />
+        </div>
+      </section>
+
+      <section className="space-y-1 rounded-[8px] bg-white/85 px-3 py-2 shadow-soft">
+        <div className="flex items-center gap-2">
+          <span className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-leaf text-white">
+            <ClipboardList size={14} />
+          </span>
+          <h2 className="text-sm font-semibold">{copy.player.instructionTitle}</h2>
+        </div>
+        <ol className="list-disc space-y-0.5 pl-5 text-[12px] leading-[18px] text-ink/80">
+          {current.instructions.map((item) => (
+            <li key={item}>{item}</li>
+          ))}
+        </ol>
+      </section>
+
+      <section className="space-y-1 rounded-[8px] bg-coral/15 px-3 py-2 shadow-soft">
+        <div className="flex items-center gap-2">
+          <span className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-coral text-white">
+            <ShieldCheck size={14} />
+          </span>
+          <h2 className="text-sm font-semibold">{copy.player.safetyTitle}</h2>
+        </div>
+        <p className="text-[12px] leading-[18px] text-ink/80">
+          {formatSafetyTips(current.safetyTips)}
+        </p>
+      </section>
+
+      <p className="text-center text-xs leading-4 text-leaf">
+        <Leaf className="mr-1 inline-block align-[-2px]" size={14} />
+        {footerCue}
+      </p>
+
+      <div className="grid grid-cols-4 gap-2 rounded-[8px] bg-paper/85 pt-1 backdrop-blur">
+        <IconButton
+          disabled={index === 0}
+          icon={<ArrowLeft size={18} />}
+          label={copy.player.previous}
+          onClick={previous}
+        />
+        <IconButton
+          icon={running ? <Pause size={18} /> : <Play size={18} />}
+          label={running ? copy.player.pause : copy.player.resume}
+          onClick={() => setRunning((currentRunning) => !currentRunning)}
+          primary
+        />
+        <IconButton icon={<SkipForward size={18} />} label={copy.player.skip} onClick={skip} />
+        <IconButton icon={<RotateCcw size={18} />} label={copy.player.restart} onClick={restart} />
+      </div>
+    </div>
+  );
+}
+
+function IconButton({
+  icon,
+  label,
+  onClick,
+  primary = false,
+  disabled = false
+}: {
+  icon: ReactNode;
+  label: string;
+  onClick: () => void;
+  primary?: boolean;
+  disabled?: boolean;
+}) {
+  return (
+    <button
+      className={cn(
+        "flex min-h-12 flex-col items-center justify-center gap-0.5 rounded-[8px] text-xs font-semibold transition",
+        primary ? "bg-leaf text-white shadow-soft" : "bg-white/85 text-ink shadow-sm",
+        disabled && "cursor-not-allowed opacity-40"
+      )}
+      disabled={disabled}
+      onClick={onClick}
+      type="button"
+    >
+      {icon}
+      {label}
+    </button>
+  );
+}
+
+function Completion({
+  session,
+  sessions,
+  mode,
+  onHome,
+  onAgain
+}: {
+  session: CompletedSession;
+  sessions: CompletedSession[];
+  mode: "regular" | "single" | "replay";
+  onHome: () => void;
+  onAgain: () => void;
+}) {
+  const modeLabel =
+    mode === "single" ? copy.completion.singleMode : mode === "replay" ? copy.completion.replayMode : copy.completion.regularMode;
+  const primaryLabel = mode === "regular" ? copy.completion.regularPrimary : copy.completion.replayPrimary;
+  const secondaryLabel =
+    mode === "single" ? copy.completion.backLibrary : mode === "replay" ? copy.completion.backProfile : copy.completion.again;
+  const feedback =
+    mode === "regular"
+      ? copy.completion.regularFeedback
+      : copy.completion.feedback[session.movementCount % copy.completion.feedback.length];
+
+  return (
+    <div className="flex min-h-[calc(100svh-40px)] animate-rise flex-col justify-between gap-8 py-6">
+      <section className="space-y-5">
+        <div className="inline-flex h-14 w-14 items-center justify-center rounded-full bg-moss text-leaf">
+          <Check size={28} />
+        </div>
+        <div className="space-y-2">
+          {mode !== "regular" && <p className="text-sm font-medium text-leaf">{modeLabel}</p>}
+          <h1 className="text-4xl font-semibold leading-tight tracking-normal">
+            {primaryLabel} {formatDuration(session.actualCompletedSec)}
+          </h1>
+          <p className="text-base leading-7 text-muted">{feedback}</p>
+        </div>
+      </section>
+
+      <section className="grid grid-cols-2 gap-3">
+        <Stat label={copy.completion.todayTotal} value={formatDuration(todayTotalSec(sessions))} />
+        <Stat label={copy.completion.streak} value={copy.common.days(calculateStreak(sessions))} />
+        <Stat label={copy.completion.movementCount} value={copy.common.movements(session.movementCount)} />
+        <Stat label={copy.completion.targetAreas} value={copy.common.targetPriority(areaLabels(session.targetAreas))} />
+      </section>
+
+      <div className="grid grid-cols-2 gap-3">
+        <button className="rounded-full bg-moss px-4 py-4 font-semibold text-ink" onClick={onHome} type="button">
+          {copy.completion.home}
+        </button>
+        <button className="rounded-full bg-leaf px-4 py-4 font-semibold text-white shadow-soft" onClick={onAgain} type="button">
+          {secondaryLabel}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function LibraryScreen({ onTry }: { onTry: (exercise: Exercise) => void }) {
+  const [filter, setFilter] = useState<TargetArea | typeof copy.library.all>(copy.library.all);
+  const filtered = filter === copy.library.all ? exercises : exercises.filter((exercise) => exercise.category === filter);
+
+  return (
+    <div className="animate-rise space-y-5">
+      <header className="space-y-2">
+        <p className="text-sm font-medium text-leaf">{copy.library.eyebrow}</p>
+        <h1 className="text-3xl font-semibold tracking-normal">{copy.library.title}</h1>
+      </header>
+
+      <div className="flex gap-2 overflow-x-auto pb-1">
+        {([copy.library.all, ...exerciseCategories] as const).map((item) => (
+          <button
+            className={cn(
+              "shrink-0 rounded-full px-4 py-2 text-sm transition",
+              filter === item ? "bg-leaf text-white" : "bg-white/75 text-muted"
+            )}
+            key={item}
+            onClick={() => setFilter(item)}
+            type="button"
+          >
+            {item}
+          </button>
+        ))}
+      </div>
+
+      <section className="space-y-3">
+        {filtered.map((exercise) => (
+          <article className="overflow-hidden rounded-[8px] bg-white/80 shadow-soft" key={exercise.id}>
+            <button
+              className="grid w-full grid-cols-[112px_1fr_auto] gap-3 p-3 text-left"
+              onClick={() => onTry(exercise)}
+              type="button"
+            >
+              <ExerciseImage exercise={exercise} />
+              <div className="min-w-0">
+                <h2 className="font-semibold">{exercise.name}</h2>
+                <p className="mt-1 line-clamp-2 text-xs leading-5 text-muted">
+                  {exercise.category} · {exercise.targetMuscles}
+                </p>
+                <p className="mt-2 text-xs text-ink/70">
+                  {copy.common.durationSec(exercise.duration)} · {exercise.posture} · {exercise.space} · {exercise.intensity}
+                </p>
+              </div>
+              <ChevronRight className="mt-2 shrink-0 text-muted" size={18} />
+            </button>
+          </article>
+        ))}
+      </section>
+    </div>
+  );
+}
+
+function ProfileScreen({
+  preferences,
+  sessions,
+  abandonedSessions,
+  todaySec,
+  streak,
+  onEdit,
+  onReplay
+}: {
+  preferences: Preferences;
+  sessions: CompletedSession[];
+  abandonedSessions: AbandonedSession[];
+  todaySec: number;
+  streak: number;
+  onEdit: () => void;
+  onReplay: (exerciseIds: string[], targetAreas: string[], plannedDurationSec: number) => void;
+}) {
+  const sortedSessions = useMemo(
+    () => [...sessions].sort((a, b) => b.completedAt.localeCompare(a.completedAt)),
+    [sessions]
+  );
+  const sortedAbandonedSessions = useMemo(
+    () => [...abandonedSessions].sort((a, b) => b.abandonedAt.localeCompare(a.abandonedAt)),
+    [abandonedSessions]
+  );
+  const totalAttempts = sessions.length + abandonedSessions.length;
+  const completionRate = totalAttempts ? Math.round((sessions.length / totalAttempts) * 100) : 0;
+
+  return (
+    <div className="animate-rise space-y-5">
+      <header className="space-y-2">
+        <p className="text-sm font-medium text-leaf">{copy.profile.eyebrow}</p>
+        <h1 className="text-3xl font-semibold tracking-normal">{copy.profile.title}</h1>
+      </header>
+
+      <section className="space-y-4 rounded-[8px] bg-white/80 p-4 shadow-soft">
+        <div>
+          <p className="text-xs text-muted">{copy.profile.currentPreferences}</p>
+          <p className="mt-2 text-sm font-semibold leading-6">{fullPreferenceSummary(preferences)}</p>
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <Stat label={copy.profile.todayTotal} value={formatDuration(todaySec)} />
+          <Stat label={copy.profile.streak} value={copy.common.days(streak)} />
+          <Stat label={copy.profile.totalCompleted} value={formatDuration(totalCompletedSec(sessions))} />
+          <Stat label={copy.profile.averageSession} value={formatDuration(averageCompletedSec(sessions))} />
+          <Stat label={copy.profile.completedSessions} value={copy.common.groups(sessions.length)} />
+          <Stat label={copy.profile.abandonedSessions} value={copy.common.records(abandonedSessions.length)} />
+        </div>
+        <p className="rounded-[8px] bg-paper px-4 py-3 text-sm leading-6 text-ink/75">
+          {copy.profile.completionRate(completionRate)}
+        </p>
+        <p className="rounded-[8px] bg-moss/70 px-4 py-3 text-sm leading-6 text-ink/75">
+          {copy.profile.exportNotice}
+        </p>
+        <div className="grid grid-cols-2 gap-3">
+          <button className="rounded-full bg-moss px-4 py-3 text-sm font-semibold text-ink" onClick={onEdit} type="button">
+            {copy.profile.editPreferences}
+          </button>
+          <button className="inline-flex items-center justify-center gap-2 rounded-full bg-leaf px-4 py-3 text-sm font-semibold text-white" onClick={() => exportActivityCsv(sortedSessions, sortedAbandonedSessions)} type="button">
+            <Download size={16} />
+            {copy.profile.exportCsv}
+          </button>
+          <button className="col-span-2 inline-flex items-center justify-center gap-2 rounded-full bg-lavender px-4 py-3 text-sm font-semibold text-ink" onClick={() => exportActivityJson(sortedSessions, sortedAbandonedSessions)} type="button">
+            <Download size={16} />
+            {copy.profile.exportJson}
+          </button>
+        </div>
+      </section>
+
+      <section className="space-y-3">
+        <h2 className="text-lg font-semibold">{copy.profile.historyTitle}</h2>
+        {sortedSessions.length === 0 ? (
+          <p className="rounded-[8px] bg-white/70 p-4 text-sm leading-6 text-muted">
+            {copy.profile.emptyHistory}
+          </p>
+        ) : (
+          sortedSessions.map((session) => (
+            <article className="rounded-[8px] bg-white/75 p-4 shadow-soft" key={session.id}>
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="font-semibold">{session.date}</p>
+                  <p className="mt-1 text-sm text-muted">
+                    {copy.common.targetPriority(areaLabels(session.targetAreas))}
+                  </p>
+                </div>
+                <span className="rounded-full bg-moss px-3 py-1 text-xs text-leaf">{copy.profile.completedBadge}</span>
+              </div>
+              <div className="mt-3 flex gap-4 text-sm text-ink/75">
+                <span>{formatDuration(session.actualCompletedSec)}</span>
+                <span>{copy.common.movementItems(session.movementCount)}</span>
+              </div>
+              <button
+                className="mt-4 w-full rounded-full bg-moss px-4 py-3 text-sm font-semibold text-ink"
+                onClick={() =>
+                  onReplay(session.exerciseIds, session.targetAreas, session.plannedDurationSec)
+                }
+                type="button"
+              >
+                {copy.profile.replayCompleted}
+              </button>
+            </article>
+          ))
+        )}
+      </section>
+
+      <section className="space-y-3">
+        <h2 className="text-lg font-semibold">{copy.profile.abandonedTitle}</h2>
+        {sortedAbandonedSessions.length === 0 ? (
+          <p className="rounded-[8px] bg-white/70 p-4 text-sm leading-6 text-muted">
+            {copy.profile.emptyAbandoned}
+          </p>
+        ) : (
+          sortedAbandonedSessions.slice(0, 10).map((session) => (
+            <article className="rounded-[8px] bg-white/75 p-4 shadow-soft" key={session.id}>
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="font-semibold">{session.date}</p>
+                  <p className="mt-1 text-sm text-muted">
+                    {copy.common.targetPriority(areaLabels(session.targetAreas))}
+                  </p>
+                </div>
+                <span className="rounded-full bg-coral/20 px-3 py-1 text-xs text-ink/70">{copy.profile.abandonedBadge}</span>
+              </div>
+              <div className="mt-3 flex flex-wrap gap-x-4 gap-y-2 text-sm text-ink/75">
+                <span>{copy.profile.donePrefix} {formatDuration(session.actualCompletedSec)}</span>
+                <span>{copy.common.movementProgress(session.completedMovementCount, session.movementCount)}</span>
+                <span>{copy.profile.stoppedAt(session.currentExerciseIndex + 1)}</span>
+              </div>
+              <button
+                className="mt-4 w-full rounded-full bg-moss px-4 py-3 text-sm font-semibold text-ink"
+                onClick={() =>
+                  onReplay(session.exerciseIds, session.targetAreas, session.plannedDurationSec)
+                }
+                type="button"
+              >
+                {copy.profile.replayPlan}
+              </button>
+            </article>
+          ))
+        )}
+      </section>
+    </div>
+  );
+}
+
+function ExerciseImage({
+  exercise,
+  large = false
+}: {
+  exercise: Exercise;
+  large?: boolean;
+}) {
+  const [failed, setFailed] = useState(false);
+  const imageSrc = exercise.coverImage;
+
+  useEffect(() => {
+    setFailed(false);
+  }, [exercise.id, imageSrc]);
+
+  return (
+    <div
+      className={cn(
+        "relative grid shrink-0 place-items-center overflow-hidden rounded-[8px]",
+        large
+          ? "aspect-[4/3] max-h-[310px] w-full bg-white shadow-soft"
+          : "h-24 w-28 bg-moss/70"
+      )}
+    >
+      {!failed ? (
+        <img
+          alt={exercise.name}
+          className={large ? "block" : "h-full w-full object-cover"}
+          onError={() => setFailed(true)}
+          src={imageSrc}
+          style={
+            large
+              ? { height: "100%", inset: 0, objectFit: "contain", position: "absolute", width: "100%" }
+              : undefined
+          }
+        />
+      ) : large ? (
+        <div aria-label={copy.player.imagePlaceholder} className="h-full w-full bg-white" />
+      ) : (
+        <span className="px-3 text-center text-xs leading-5 text-leaf">{copy.player.imagePlaceholder}</span>
+      )}
+    </div>
+  );
+}
+
+export default App;
