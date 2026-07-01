@@ -5,7 +5,7 @@ export const copy = {
       "动作做到有轻微拉伸感即可，不要拉到疼。如出现疼痛、头晕、麻木或明显不适，请立即停止。"
   },
   tabs: {
-    home: "开始",
+    home: "首页",
     library: "动作库",
     profile: "我的"
   },
@@ -83,8 +83,9 @@ export const copy = {
     recommendationPrefix: "为你推荐：",
     startSeated: "坐着动一下",
     startStanding: "站着动一下",
-    seatedDescription: "不想起身也可以，坐着放松。",
-    standingDescription: "都站起来了，顺手身体回个电。",
+    seatedDescription: "不方便站起时，先在座位上舒展一下",
+    standingDescription: "短暂离开椅子，给身体一个间隙",
+    startAction: "开始 →",
     temporary: "本次调整",
     editPreferences: "修改长期偏好",
     todayTotal: "今日累计",
@@ -105,6 +106,11 @@ export const copy = {
     resume: "继续",
     skip: "跳过",
     restart: "重来",
+    learningTitle: "先看一下动作要点",
+    learningPhilosophy: "不用做到完美，重点是轻轻活动一下，把久坐打断。",
+    learnedAction: "我已学会，立刻开始拉伸",
+    tips: "动作提示",
+    closeTips: "关闭提示",
     imagePlaceholder: "动作示意图待替换"
   },
   completion: {
@@ -122,6 +128,7 @@ export const copy = {
     movementCount: "完成动作",
     targetAreas: "重点部位",
     regularFeedback: "刚刚好，给身体回了一点电。",
+    sittingBreakFeedback: "你刚刚让身体从久坐里出来了一下。",
     feedback: [
       "状态接回来了，继续也不用硬扛。",
       "刚才那段僵硬，先松开一点了。",
@@ -147,8 +154,6 @@ export const copy = {
     averageSession: "平均每组",
     completedSessions: "完成组数",
     abandonedSessions: "放弃记录",
-    completionRate: (rate: number) =>
-      `session 完成率 ${rate}% · 放弃记录只用于了解中断点，不计入连续天数。`,
     editPreferences: "修改长期偏好",
     exportNotice:
       "数据仅保存在你的设备浏览器中。我们不会自动收集你的运动记录。如你愿意参与测试，请点击导出 CSV/JSON，并发送给研究者/产品方。",

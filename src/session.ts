@@ -24,7 +24,11 @@ const PAIRED_EXERCISES: Record<string, string> = {
   neck_forward_release: "neck_backward_release",
   neck_backward_release: "neck_forward_release",
   shoulder_posterior_stretch_left: "shoulder_posterior_stretch_right",
-  shoulder_posterior_stretch_right: "shoulder_posterior_stretch_left"
+  shoulder_posterior_stretch_right: "shoulder_posterior_stretch_left",
+  lower_back_overhead_side_bend_left: "lower_back_overhead_side_bend_right",
+  lower_back_overhead_side_bend_right: "lower_back_overhead_side_bend_left",
+  lower_back_rotation_side_bend_left: "lower_back_rotation_side_bend_right",
+  lower_back_rotation_side_bend_right: "lower_back_rotation_side_bend_left"
 };
 
 function uid(prefix: string) {

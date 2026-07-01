@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   ArrowLeft,
   Bell,
@@ -7,7 +7,6 @@ import {
   ClipboardList,
   Download,
   Home,
-  Leaf,
   LibraryBig,
   Pause,
   Play,
@@ -15,7 +14,8 @@ import {
   ShieldCheck,
   SkipForward,
   Sparkles,
-  UserRound
+  UserRound,
+  X
 } from "lucide-react";
 import { exerciseCategories, exercises, type Exercise, type ExerciseIntensity, type ExerciseSpace } from "./data/exercises";
 import {
@@ -23,7 +23,9 @@ import {
   appendSession,
   loadAbandonedSessions,
   loadPreferences,
+  loadLearnedExerciseIds,
   loadSessions,
+  markExerciseLearned,
   savePreferences
 } from "./storage";
 import {
@@ -77,7 +79,9 @@ const onboardingDraft: OnboardingDraft = {
 const durationOptions = [30, 60, 90, 120, 150, 180];
 const targetAreaOptions: Array<{ value: TargetArea; label: string; emoji: string }> = [
   { value: "肩颈", label: "肩颈", emoji: "💻" },
-  { value: "背部与腰部", label: "腰背", emoji: "🪑" }
+  { value: "上背", label: "上背", emoji: "🪽" },
+  { value: "胸肩", label: "胸肩", emoji: "🙆" },
+  { value: "腰背", label: "腰背", emoji: "🪑" }
 ];
 const onboardingIllustrations = [
   "/assets/ip/ip-1.png",
@@ -125,14 +129,6 @@ function recentCompletedExerciseIds(sessions: CompletedSession[], limit = 3) {
     .slice(0, limit);
 }
 
-function formatSafetyTips(tips: string[]) {
-  const text = tips
-    .map((tip) => tip.trim().replace(/[。；;]+$/u, ""))
-    .filter(Boolean)
-    .join("；");
-  return text ? `${text}。` : "";
-}
-
 function App() {
   const [preferences, setPreferences] = useState<Preferences | null>(() => loadPreferences());
   const [sessions, setSessions] = useState<CompletedSession[]>(() => loadSessions());
@@ -145,10 +141,24 @@ function App() {
   );
   const [reminderVisible, setReminderVisible] = useState(false);
   const [reminderMutedToday, setReminderMutedToday] = useState(false);
+  const recentlyRecommendedIds = useRef<string[]>([]);
 
   const todaySec = todayTotalSec(sessions);
   const streak = calculateStreak(sessions);
   const recentExerciseIds = useMemo(() => recentCompletedExerciseIds(sessions), [sessions]);
+
+  function recommendationHistory() {
+    return Array.from(new Set([...recentlyRecommendedIds.current, ...recentExerciseIds]));
+  }
+
+  function rememberRecommendation(plan: ReturnType<typeof generateSession>) {
+    const firstExerciseId = plan.exercises[0]?.id;
+    if (!firstExerciseId) return;
+    recentlyRecommendedIds.current = [
+      firstExerciseId,
+      ...recentlyRecommendedIds.current.filter((id) => id !== firstExerciseId)
+    ].slice(0, 3);
+  }
 
   function persistPreferences(draft: PreferenceDraft, returnTo: "home" | "profile" = "home") {
     const { movementMode: _movementMode, ...preferenceValues } = draft;
@@ -176,22 +186,25 @@ function App() {
           ...preferences,
           movementMode: mode,
           space: spaceOverride,
-          recentExerciseIds
+          recentExerciseIds: recommendationHistory()
         }
       : {
           ...preferences,
-          recentExerciseIds
+          recentExerciseIds: recommendationHistory()
         };
+    const plan = generateSession(modePreferences);
+    rememberRecommendation(plan);
     setReminderVisible(false);
-    setView({ name: "player", session: generateSession(modePreferences) });
+    setView({ name: "player", session: plan });
   }
 
   function startTemporary(draft: PreferenceDraft) {
     const plan = generateSession({
       ...draft,
       movementMode: draft.movementMode ?? "seated",
-      recentExerciseIds
+      recentExerciseIds: recommendationHistory()
     });
+    rememberRecommendation(plan);
     setView({ name: "player", session: { ...plan, source: "temporary" } });
   }
 
@@ -962,34 +975,38 @@ function HomeScreen({
           </div>
         </div>
         <div className="space-y-4 p-5">
-          <section className="grid grid-cols-2 gap-3">
-            <Stat label={copy.home.todayTotal} value={formatDuration(todaySec)} />
-            <Stat label={copy.home.streak} value={copy.common.days(streak)} />
-          </section>
-          <p className="rounded-[8px] bg-paper px-4 py-3 text-sm leading-6 text-ink/80">
-            {copy.home.recommendationPrefix}{preferenceSummary(preferences)}
-          </p>
+          <div className="rounded-[8px] bg-paper px-4 py-3">
+            <p className="text-sm leading-6 text-ink/80">
+              {copy.home.recommendationPrefix}{preferenceSummary(preferences)}
+            </p>
+          </div>
           <div className="grid grid-cols-2 gap-3">
             <button
-              className="min-h-32 rounded-[8px] bg-leaf px-4 py-4 text-left text-white shadow-soft transition hover:translate-y-[-1px]"
+              className="flex min-h-40 flex-col rounded-[10px] border border-white/35 bg-gradient-to-br from-leaf to-[#5f7f63] px-4 py-4 text-left text-white shadow-[0_7px_0_#4f6f54,0_15px_28px_rgba(47,50,45,0.18)] transition-[transform,box-shadow] duration-150 hover:-translate-y-1 hover:shadow-[0_9px_0_#4f6f54,0_19px_34px_rgba(47,50,45,0.2)] active:translate-y-1 active:shadow-[0_2px_0_#4f6f54,0_8px_16px_rgba(47,50,45,0.14)]"
               onClick={() => onStart("seated")}
               type="button"
             >
               <span className="block text-lg font-semibold">{copy.home.startSeated}</span>
-              <span className="mt-1 block text-sm leading-6 text-white/80">{copy.home.seatedDescription}</span>
+              <span className="mt-2 block text-xs leading-5 text-white/80">{copy.home.seatedDescription}</span>
+              <span className="mt-auto self-end text-sm font-semibold">{copy.home.startAction}</span>
             </button>
             <button
-              className="min-h-32 rounded-[8px] bg-moss px-4 py-4 text-left text-ink transition hover:translate-y-[-1px]"
+              className="flex min-h-40 flex-col rounded-[10px] border border-white/70 bg-gradient-to-br from-[#e5efd8] to-moss px-4 py-4 text-left text-ink shadow-[0_7px_0_#bfd0ad,0_15px_28px_rgba(47,50,45,0.14)] transition-[transform,box-shadow] duration-150 hover:-translate-y-1 hover:shadow-[0_9px_0_#bfd0ad,0_19px_34px_rgba(47,50,45,0.17)] active:translate-y-1 active:shadow-[0_2px_0_#bfd0ad,0_8px_16px_rgba(47,50,45,0.11)]"
               onClick={() => onStart("standing")}
               type="button"
             >
               <span className="block text-lg font-semibold">{copy.home.startStanding}</span>
-              <span className="mt-1 block text-sm leading-6 text-ink/65">{copy.home.standingDescription}</span>
-            </button>
-            <button className="col-span-2 rounded-full bg-white/80 px-5 py-4 text-base font-semibold text-ink shadow-sm" onClick={onTemporary} type="button">
-              {copy.home.temporary}
+              <span className="mt-2 block text-xs leading-5 text-ink/65">{copy.home.standingDescription}</span>
+              <span className="mt-auto self-end text-sm font-semibold text-leaf">{copy.home.startAction}</span>
             </button>
           </div>
+          <section className="grid grid-cols-2 gap-3">
+            <Stat label={copy.home.todayTotal} value={formatDuration(todaySec)} quiet />
+            <Stat label={copy.home.streak} value={copy.common.days(streak)} quiet />
+          </section>
+          <button className="w-full rounded-full bg-white/85 px-5 py-4 text-base font-semibold text-ink shadow-sm transition duration-150 hover:-translate-y-0.5 active:translate-y-0.5 active:scale-[0.99]" onClick={onTemporary} type="button">
+            {copy.home.temporary}
+          </button>
         </div>
       </section>
     </div>
@@ -1038,9 +1055,9 @@ function ReminderDialog({
   );
 }
 
-function Stat({ label, value }: { label: string; value: string }) {
+function Stat({ label, value, quiet = false }: { label: string; value: string; quiet?: boolean }) {
   return (
-    <div className="rounded-[8px] bg-white/75 p-4 shadow-soft">
+    <div className={cn("rounded-[8px] p-4", quiet ? "border border-black/5 bg-paper/70" : "bg-white/75 shadow-soft")}>
       <p className="text-xs text-muted">{label}</p>
       <p className="mt-2 text-xl font-semibold">{value}</p>
     </div>
@@ -1057,21 +1074,36 @@ function ExercisePlayer({
   onExit: (actualCompletedSec: number, currentExerciseIndex: number) => void;
 }) {
   const [index, setIndex] = useState(0);
-  const [remainingSec, setRemainingSec] = useState(() => session.session.exercises[0]?.duration ?? 30);
+  const learnedExerciseIds = useRef(new Set(loadLearnedExerciseIds()));
+  const initialExercise = session.session.exercises[0];
+  const [phase, setPhase] = useState<"learning" | "exercise">(() =>
+    learnedExerciseIds.current.has(initialExercise?.id) ? "exercise" : "learning"
+  );
+  const [learningRemainingSec, setLearningRemainingSec] = useState(10);
+  const [remainingSec, setRemainingSec] = useState(() => initialExercise?.duration ?? 30);
   const [running, setRunning] = useState(true);
   const [actualCompletedSec, setActualCompletedSec] = useState(0);
   const [finished, setFinished] = useState(false);
+  const [tipsOpen, setTipsOpen] = useState(false);
+  const wasRunningBeforeTips = useRef(true);
   const current = session.session.exercises[index];
   const total = session.session.exercises.length;
   const exerciseDurationSec = current.duration;
-  const footerCue =
-    current.category === "肩颈"
-      ? "每天几分钟，轻松呵护颈肩"
-      : "每天几分钟，轻松呵护腰背";
 
   useEffect(() => {
     if (!running || finished) return undefined;
     const timer = window.setInterval(() => {
+      if (phase === "learning") {
+        setLearningRemainingSec((currentRemaining) => {
+          if (currentRemaining > 1) return currentRemaining - 1;
+          learnedExerciseIds.current.add(current.id);
+          markExerciseLearned(current.id);
+          setPhase("exercise");
+          setRemainingSec(current.duration);
+          return 0;
+        });
+        return;
+      }
       setRemainingSec((currentRemaining) => {
         const nextRemaining = currentRemaining - 1;
         setActualCompletedSec((currentActual) => {
@@ -1088,8 +1120,16 @@ function ExercisePlayer({
           if (index < total - 1) {
             window.setTimeout(() => {
               const nextExercise = session.session.exercises[index + 1];
-              setIndex((currentIndex) => Math.min(currentIndex + 1, total - 1));
-              setRemainingSec(nextExercise?.duration ?? 30);
+              const nextIndex = Math.min(index + 1, total - 1);
+              setIndex(nextIndex);
+              setTipsOpen(false);
+              if (nextExercise && !learnedExerciseIds.current.has(nextExercise.id)) {
+                setPhase("learning");
+                setLearningRemainingSec(10);
+              } else {
+                setPhase("exercise");
+                setRemainingSec(nextExercise?.duration ?? 30);
+              }
             }, 0);
           }
           return current.duration;
@@ -1098,7 +1138,30 @@ function ExercisePlayer({
       });
     }, 1000);
     return () => window.clearInterval(timer);
-  }, [current.duration, finished, index, onComplete, running, session.session.exercises, total]);
+  }, [current.id, current.duration, finished, index, onComplete, phase, running, session.session.exercises, total]);
+
+  function startExercise() {
+    learnedExerciseIds.current.add(current.id);
+    markExerciseLearned(current.id);
+    setPhase("exercise");
+    setRemainingSec(current.duration);
+    setRunning(true);
+  }
+
+  function showExercise(nextIndex: number) {
+    const nextExercise = session.session.exercises[nextIndex];
+    if (!nextExercise) return;
+    setIndex(nextIndex);
+    setTipsOpen(false);
+    setRunning(true);
+    if (learnedExerciseIds.current.has(nextExercise.id)) {
+      setPhase("exercise");
+      setRemainingSec(nextExercise.duration);
+    } else {
+      setPhase("learning");
+      setLearningRemainingSec(10);
+    }
+  }
 
   function exitToHome() {
     setRunning(false);
@@ -1107,10 +1170,7 @@ function ExercisePlayer({
 
   function previous() {
     if (index <= 0) return;
-    const previousExercise = session.session.exercises[index - 1];
-    setIndex((currentIndex) => Math.max(currentIndex - 1, 0));
-    setRemainingSec(previousExercise?.duration ?? 30);
-    setRunning(true);
+    showExercise(index - 1);
   }
 
   function skip() {
@@ -1120,10 +1180,7 @@ function ExercisePlayer({
       onComplete(actualCompletedSec);
       return;
     }
-    const nextExercise = session.session.exercises[index + 1];
-    setIndex((currentIndex) => currentIndex + 1);
-    setRemainingSec(nextExercise?.duration ?? 30);
-    setRunning(true);
+    showExercise(index + 1);
   }
 
   function restart() {
@@ -1131,10 +1188,64 @@ function ExercisePlayer({
     setRunning(true);
   }
 
+  function openTips() {
+    wasRunningBeforeTips.current = running;
+    setRunning(false);
+    setTipsOpen(true);
+  }
+
+  function closeTips() {
+    setTipsOpen(false);
+    setRunning(wasRunningBeforeTips.current);
+  }
+
   const progressPercent = ((exerciseDurationSec - remainingSec) / exerciseDurationSec) * 100;
 
+  if (phase === "learning") {
+    return (
+      <div className="flex min-h-[calc(100svh-24px)] animate-rise flex-col gap-4 pb-[calc(env(safe-area-inset-bottom)+0.5rem)]">
+        <header className="flex items-center justify-between">
+          <button
+            className="inline-flex min-h-10 items-center gap-1.5 rounded-full px-1 text-sm font-semibold text-ink"
+            onClick={exitToHome}
+            type="button"
+          >
+            <ArrowLeft size={18} />
+            {copy.common.backHome}
+          </button>
+          <span className="rounded-full bg-moss px-3 py-1 text-xs font-semibold text-leaf">
+            {copy.player.progress(index + 1, total)}
+          </span>
+        </header>
+
+        <section className="text-center">
+          <h1 className="text-3xl font-semibold tracking-normal">{copy.player.learningTitle}</h1>
+          <p className="mx-auto mt-2 max-w-sm text-sm leading-6 text-muted">{copy.player.learningPhilosophy}</p>
+          <p className="mt-3 text-5xl font-semibold tabular-nums text-leaf" aria-label={`${learningRemainingSec} ${copy.common.seconds}`}>
+            {learningRemainingSec}
+          </p>
+        </section>
+
+        <ExerciseImage exercise={current} large />
+
+        <div className="grid gap-3">
+          <DetailPanel icon={<ClipboardList size={15} />} title={copy.player.instructionTitle} items={current.instructions} />
+          <DetailPanel icon={<ShieldCheck size={15} />} title={copy.player.safetyTitle} items={current.safetyTips} safety />
+        </div>
+
+        <button
+          className="mt-auto min-h-14 w-full rounded-full bg-leaf px-5 py-4 text-base font-semibold text-white shadow-soft transition active:scale-[0.99]"
+          onClick={startExercise}
+          type="button"
+        >
+          {copy.player.learnedAction}
+        </button>
+      </div>
+    );
+  }
+
   return (
-    <div className="flex min-h-[calc(100svh-24px)] animate-rise flex-col gap-2 pb-[calc(env(safe-area-inset-bottom)+0.35rem)]">
+    <div className="relative flex min-h-[calc(100svh-24px)] animate-rise flex-col gap-3 pb-[calc(env(safe-area-inset-bottom)+0.35rem)]">
       <header className="flex items-center justify-between pb-0.5">
         <button
           className="inline-flex min-h-9 items-center justify-center gap-1.5 rounded-full px-1 py-1 text-sm font-semibold text-ink"
@@ -1149,54 +1260,24 @@ function ExercisePlayer({
         </span>
       </header>
 
-      <ExerciseImage exercise={current} large />
-
-      <section className="space-y-1">
-        <div className="flex items-end justify-between gap-3">
-          <div className="min-w-0">
-            <p className="text-[12px] leading-4 text-muted">{areaLabel(current.category)} · {current.posture}</p>
-            <h1 className="text-[24px] font-semibold leading-[1.1] tracking-normal">{current.name}</h1>
-          </div>
-          <div className="shrink-0 text-right">
-            <p className="text-[40px] font-semibold leading-none tabular-nums text-leaf">{remainingSec}</p>
-            <p className="text-xs text-muted">{copy.common.seconds}</p>
-          </div>
+      <section className="flex flex-1 flex-col justify-center gap-4 py-1">
+        <ExerciseImage exercise={current} immersive />
+        <div className="text-center">
+          <p className="text-6xl font-semibold leading-none tabular-nums text-leaf">{remainingSec}</p>
+          <p className="mt-1 text-xs text-muted">{copy.common.seconds}</p>
         </div>
         <div className="h-1.5 overflow-hidden rounded-full bg-white">
           <div className="h-full rounded-full bg-leaf transition-all duration-500" style={{ width: `${progressPercent}%` }} />
         </div>
       </section>
 
-      <section className="space-y-1 rounded-[8px] bg-white/85 px-3 py-2 shadow-soft">
-        <div className="flex items-center gap-2">
-          <span className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-leaf text-white">
-            <ClipboardList size={14} />
-          </span>
-          <h2 className="text-sm font-semibold">{copy.player.instructionTitle}</h2>
-        </div>
-        <ol className="list-disc space-y-0.5 pl-5 text-[12px] leading-[18px] text-ink/80">
-          {current.instructions.map((item) => (
-            <li key={item}>{item}</li>
-          ))}
-        </ol>
-      </section>
-
-      <section className="space-y-1 rounded-[8px] bg-coral/15 px-3 py-2 shadow-soft">
-        <div className="flex items-center gap-2">
-          <span className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-coral text-white">
-            <ShieldCheck size={14} />
-          </span>
-          <h2 className="text-sm font-semibold">{copy.player.safetyTitle}</h2>
-        </div>
-        <p className="text-[12px] leading-[18px] text-ink/80">
-          {formatSafetyTips(current.safetyTips)}
-        </p>
-      </section>
-
-      <p className="text-center text-xs leading-4 text-leaf">
-        <Leaf className="mr-1 inline-block align-[-2px]" size={14} />
-        {footerCue}
-      </p>
+      <button
+        className="absolute bottom-[4.25rem] right-0 z-10 rounded-full border border-white/70 bg-white/70 px-4 py-2 text-xs font-semibold text-ink/75 shadow-sm backdrop-blur-md transition hover:bg-white/90"
+        onClick={openTips}
+        type="button"
+      >
+        {copy.player.tips}
+      </button>
 
       <div className="grid grid-cols-4 gap-2 rounded-[8px] bg-paper/85 pt-1 backdrop-blur">
         <IconButton
@@ -1214,7 +1295,55 @@ function ExercisePlayer({
         <IconButton icon={<SkipForward size={18} />} label={copy.player.skip} onClick={skip} />
         <IconButton icon={<RotateCcw size={18} />} label={copy.player.restart} onClick={restart} />
       </div>
+
+      {tipsOpen && (
+        <div className="fixed inset-0 z-30 grid place-items-center bg-ink/20 px-5 py-8 backdrop-blur-sm">
+          <section aria-modal="true" className="max-h-[80svh] w-full max-w-md overflow-y-auto rounded-[22px] border border-white/60 bg-white/75 p-5 shadow-[0_24px_80px_rgba(47,50,45,0.22)] backdrop-blur-xl" role="dialog">
+            <div className="flex items-center justify-between gap-4">
+              <h2 className="text-xl font-semibold">{copy.player.tips}</h2>
+              <button
+                aria-label={copy.player.closeTips}
+                className="grid h-10 w-10 place-items-center rounded-full bg-white/80 text-muted"
+                onClick={closeTips}
+                type="button"
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <div className="mt-4 grid gap-3">
+              <DetailPanel icon={<ClipboardList size={15} />} title={copy.player.instructionTitle} items={current.instructions} />
+              <DetailPanel icon={<ShieldCheck size={15} />} title={copy.player.safetyTitle} items={current.safetyTips} safety />
+            </div>
+          </section>
+        </div>
+      )}
     </div>
+  );
+}
+
+function DetailPanel({
+  icon,
+  title,
+  items,
+  safety = false
+}: {
+  icon: ReactNode;
+  title: string;
+  items: string[];
+  safety?: boolean;
+}) {
+  return (
+    <section className={cn("rounded-[8px] px-4 py-3", safety ? "bg-coral/15" : "bg-white/85 shadow-sm")}>
+      <div className="flex items-center gap-2">
+        <span className={cn("grid h-8 w-8 shrink-0 place-items-center rounded-full text-white", safety ? "bg-coral" : "bg-leaf")}>
+          {icon}
+        </span>
+        <h2 className="text-sm font-semibold">{title}</h2>
+      </div>
+      <ul className="mt-2 list-disc space-y-1 pl-5 text-sm leading-5 text-ink/80">
+        {items.map((item) => <li key={item}>{item}</li>)}
+      </ul>
+    </section>
   );
 }
 
@@ -1283,6 +1412,7 @@ function Completion({
             {primaryLabel} {formatDuration(session.actualCompletedSec)}
           </h1>
           <p className="text-base leading-7 text-muted">{feedback}</p>
+          <p className="text-base font-semibold leading-7 text-leaf">{copy.completion.sittingBreakFeedback}</p>
         </div>
       </section>
 
@@ -1384,9 +1514,6 @@ function ProfileScreen({
     () => [...abandonedSessions].sort((a, b) => b.abandonedAt.localeCompare(a.abandonedAt)),
     [abandonedSessions]
   );
-  const totalAttempts = sessions.length + abandonedSessions.length;
-  const completionRate = totalAttempts ? Math.round((sessions.length / totalAttempts) * 100) : 0;
-
   return (
     <div className="animate-rise space-y-5">
       <header className="space-y-2">
@@ -1407,9 +1534,6 @@ function ProfileScreen({
           <Stat label={copy.profile.completedSessions} value={copy.common.groups(sessions.length)} />
           <Stat label={copy.profile.abandonedSessions} value={copy.common.records(abandonedSessions.length)} />
         </div>
-        <p className="rounded-[8px] bg-paper px-4 py-3 text-sm leading-6 text-ink/75">
-          {copy.profile.completionRate(completionRate)}
-        </p>
         <p className="rounded-[8px] bg-moss/70 px-4 py-3 text-sm leading-6 text-ink/75">
           {copy.profile.exportNotice}
         </p>
@@ -1506,10 +1630,12 @@ function ProfileScreen({
 
 function ExerciseImage({
   exercise,
-  large = false
+  large = false,
+  immersive = false
 }: {
   exercise: Exercise;
   large?: boolean;
+  immersive?: boolean;
 }) {
   const [failed, setFailed] = useState(false);
   const imageSrc = exercise.coverImage;
@@ -1522,24 +1648,21 @@ function ExerciseImage({
     <div
       className={cn(
         "relative grid shrink-0 place-items-center overflow-hidden rounded-[8px]",
-        large
-          ? "aspect-[4/3] max-h-[310px] w-full bg-white shadow-soft"
-          : "h-24 w-28 bg-moss/70"
+        immersive
+          ? "aspect-square w-full bg-white shadow-soft"
+          : large
+            ? "w-full bg-white shadow-soft"
+            : "h-24 w-28 bg-moss/70"
       )}
     >
       {!failed ? (
         <img
           alt={exercise.name}
-          className={large ? "block" : "h-full w-full object-cover"}
+          className={immersive ? "h-full w-full object-contain" : large ? "block h-auto w-full" : "h-full w-full object-cover"}
           onError={() => setFailed(true)}
           src={imageSrc}
-          style={
-            large
-              ? { height: "100%", inset: 0, objectFit: "contain", position: "absolute", width: "100%" }
-              : undefined
-          }
         />
-      ) : large ? (
+      ) : large || immersive ? (
         <div aria-label={copy.player.imagePlaceholder} className="h-full w-full bg-white" />
       ) : (
         <span className="px-3 text-center text-xs leading-5 text-leaf">{copy.player.imagePlaceholder}</span>
