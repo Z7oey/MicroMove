@@ -14,7 +14,6 @@ export type Preferences = {
   targetAreas: TargetArea[];
   space: ExerciseSpace;
   intensity: ExerciseIntensity;
-  reminderFrequency: "30分钟后" | "60分钟后" | "90分钟后" | "暂不设置" | "每45分钟" | "每60分钟" | "每90分钟" | "暂不提醒";
   updatedAt: string;
 };
 

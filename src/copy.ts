@@ -49,21 +49,7 @@ export const copy = {
     durationMinLabel: "30 秒",
     durationMaxLabel: "3 分钟",
     targetAreasTitle: "你最想优先放松哪里？",
-    spaceTitle: "你工作时方便活动的空间？",
-    intensityTitle: "你希望动作强度？",
-    movementModeTitle: "这次想怎么动？",
-    reminderTitle: "是否设置提醒闹钟？",
-    spaceSmall: "小空间",
-    spaceSmallDescription: "主要坐着，动作不能太明显",
-    spaceMedium: "中空间",
-    spaceMediumDescription: "可以站起来，桌边活动一下",
-    spaceLarge: "大空间",
-    spaceLargeDescription: "允许在工作场所周围进行大幅度活动",
-    intensityGentle: "温和",
-    intensityGentleDescription: "只想松一下，不想费力",
-    intensityMedium: "中等",
-    intensityMediumDescription: "可以稍微活动开一点",
-    reminderOptions: ["30分钟后", "60分钟后", "90分钟后", "暂不设置"]
+    movementModeTitle: "这次想怎么动？"
   },
   onboarding: {
     eyebrow: "MicroMove",
@@ -89,12 +75,7 @@ export const copy = {
     temporary: "本次调整",
     editPreferences: "修改长期偏好",
     todayTotal: "今日累计",
-    streak: "连续天数",
-    reminderTitle: "提醒闹钟",
-    reminderHelper: "默认是网页内提醒；网页开着时，到点会弹出提醒。",
-    reminderSystemTitle: "开启系统提醒（推荐）",
-    reminderSystemHelper: "允许通知权限后，可在设定时间收到浏览器通知。纯网页环境下不承诺 100% 必达。",
-    requestNotification: "开启通知权限"
+    streak: "连续天数"
   },
   player: {
     progress: (current: number, total: number) => `动作 ${current} / ${total}`,

@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   ArrowLeft,
-  Bell,
   Check,
   ChevronRight,
   ClipboardList,
@@ -49,7 +48,7 @@ import { copy } from "./copy";
 
 type PreferenceDraft = Pick<
   Preferences,
-  "durationMin" | "sessionDurationSec" | "targetAreas" | "space" | "intensity" | "reminderFrequency"
+  "durationMin" | "sessionDurationSec" | "targetAreas" | "space" | "intensity"
 > & {
   movementMode?: MovementMode;
 };
@@ -59,11 +58,10 @@ const defaultDraft: PreferenceDraft = {
   sessionDurationSec: 60,
   targetAreas: ["肩颈"],
   space: "小空间",
-  intensity: "温和",
-  reminderFrequency: "暂不设置"
+  intensity: "温和"
 };
 
-type OnboardingDraft = Omit<PreferenceDraft, "space" | "intensity" | "reminderFrequency"> & {
+type OnboardingDraft = Omit<PreferenceDraft, "space" | "intensity"> & {
   space: ExerciseSpace | null;
   intensity: ExerciseIntensity | null;
 };
@@ -95,12 +93,6 @@ function areaLabel(area: string) {
 
 function areaLabels(areas: string[]) {
   return areas.map(areaLabel);
-}
-
-function reminderDelayMs(reminderFrequency: Preferences["reminderFrequency"]) {
-  const match = reminderFrequency.match(/\d+/);
-  if (!match || reminderFrequency.includes("暂不")) return null;
-  return Number(match[0]) * 60 * 1000;
 }
 
 function cn(...classes: Array<string | false | null | undefined>) {
@@ -139,8 +131,6 @@ function App() {
   const [view, setView] = useState<AppView>(() =>
     loadPreferences() ? { name: "home" } : { name: "onboarding" }
   );
-  const [reminderVisible, setReminderVisible] = useState(false);
-  const [reminderMutedToday, setReminderMutedToday] = useState(false);
   const recentlyRecommendedIds = useRef<string[]>([]);
 
   const todaySec = todayTotalSec(sessions);
@@ -194,7 +184,6 @@ function App() {
         };
     const plan = generateSession(modePreferences);
     rememberRecommendation(plan);
-    setReminderVisible(false);
     setView({ name: "player", session: plan });
   }
 
@@ -242,38 +231,6 @@ function App() {
     }
     setView({ name: "home" });
   }
-
-  function updateReminder(reminderFrequency: Preferences["reminderFrequency"]) {
-    if (!preferences) return;
-    const next = {
-      ...preferences,
-      reminderFrequency,
-      updatedAt: new Date().toISOString()
-    };
-    savePreferences(next);
-    setPreferences(next);
-    setReminderMutedToday(false);
-    setReminderVisible(false);
-  }
-
-  function remindLater() {
-    updateReminder("30分钟后");
-  }
-
-  useEffect(() => {
-    if (!preferences || reminderMutedToday || view.name === "onboarding") return undefined;
-    const delay = reminderDelayMs(preferences.reminderFrequency);
-    if (!delay) return undefined;
-    const timer = window.setTimeout(() => {
-      setReminderVisible(true);
-      if (typeof Notification !== "undefined" && Notification.permission === "granted") {
-        new Notification("该松一下了。", {
-          body: "刚好停一下，做一组 30 秒动作。"
-        });
-      }
-    }, delay);
-    return () => window.clearTimeout(timer);
-  }, [preferences, reminderMutedToday, view.name]);
 
   if (view.name === "onboarding") {
     return (
@@ -399,16 +356,6 @@ function App() {
           }
         />
       )}
-      {reminderVisible && (
-        <ReminderDialog
-          onStart={() => startFromPreferences()}
-          onLater={remindLater}
-          onMuteToday={() => {
-            setReminderVisible(false);
-            setReminderMutedToday(true);
-          }}
-        />
-      )}
     </Shell>
   );
 }
@@ -471,7 +418,7 @@ function TabButton({
 function Onboarding({ onSubmit }: { onSubmit: (draft: PreferenceDraft) => void }) {
   const [step, setStep] = useState(0);
   const [draft, setDraft] = useState<OnboardingDraft>(onboardingDraft);
-  const totalSteps = 4;
+  const totalSteps = 2;
   const progressPercent = ((step + 1) / totalSteps) * 100;
   const needsConfirm = step === 0;
   const canContinueAreas = draft.targetAreas.length > 0;
@@ -482,8 +429,7 @@ function Onboarding({ onSubmit }: { onSubmit: (draft: PreferenceDraft) => void }
     return {
       ...nextDraft,
       space: nextDraft.space ?? "小空间",
-      intensity: nextDraft.intensity ?? "温和",
-      reminderFrequency: "暂不设置"
+      intensity: nextDraft.intensity ?? "温和"
     };
   }
 
@@ -497,11 +443,6 @@ function Onboarding({ onSubmit }: { onSubmit: (draft: PreferenceDraft) => void }
       return;
     }
     setStep((current) => Math.min(totalSteps - 1, current + 1));
-  }
-
-  function choose(nextDraft: OnboardingDraft) {
-    setDraft(nextDraft);
-    goNext(nextDraft);
   }
 
   function toggleArea(area: TargetArea) {
@@ -610,55 +551,6 @@ function Onboarding({ onSubmit }: { onSubmit: (draft: PreferenceDraft) => void }
           </section>
         )}
 
-        {step === 2 && (
-          <Section title={copy.preferences.spaceTitle}>
-            <div className="space-y-2">
-              <OptionButton
-                active={draft.space === "小空间"}
-                emoji="🪑"
-                label={copy.preferences.spaceSmall}
-                description={copy.preferences.spaceSmallDescription}
-                onClick={() => choose({ ...draft, space: "小空间" })}
-              />
-              <OptionButton
-                active={draft.space === "中空间"}
-                emoji="🧍"
-                label={copy.preferences.spaceMedium}
-                description={copy.preferences.spaceMediumDescription}
-                onClick={() => choose({ ...draft, space: "中空间" })}
-              />
-              <OptionButton
-                active={draft.space === "大空间"}
-                emoji="🚶"
-                label={copy.preferences.spaceLarge}
-                description={copy.preferences.spaceLargeDescription}
-                onClick={() => choose({ ...draft, space: "大空间" })}
-              />
-            </div>
-          </Section>
-        )}
-
-        {step === 3 && (
-          <Section title={copy.preferences.intensityTitle}>
-            <div className="space-y-2">
-              <OptionButton
-                active={draft.intensity === "温和"}
-                emoji="🍃"
-                label={copy.preferences.intensityGentle}
-                description={copy.preferences.intensityGentleDescription}
-                onClick={() => choose({ ...draft, intensity: "温和" })}
-              />
-              <OptionButton
-                active={draft.intensity === "中等"}
-                emoji="⚡"
-                label={copy.preferences.intensityMedium}
-                description={copy.preferences.intensityMediumDescription}
-                onClick={() => choose({ ...draft, intensity: "中等" })}
-              />
-            </div>
-          </Section>
-        )}
-
       </div>
 
       <div className="fixed inset-x-0 bottom-0 z-20 border-t border-black/5 bg-paper/95 px-5 py-4 backdrop-blur">
@@ -680,7 +572,7 @@ function Onboarding({ onSubmit }: { onSubmit: (draft: PreferenceDraft) => void }
             >
               {needsConfirm
                 ? copy.onboarding.durationAction(draft.sessionDurationSec)
-                : copy.onboarding.targetAreasAction}
+                : copy.onboarding.startAction}
             </button>
           ) : (
             null
@@ -810,46 +702,6 @@ function PreferenceForm({
               onClick={() => toggleArea(area.value)}
             />
           ))}
-        </div>
-      </Section>
-
-      <Section title={copy.preferences.spaceTitle}>
-        <div className="space-y-2">
-          <OptionButton
-            active={draft.space === "小空间"}
-            label={copy.preferences.spaceSmall}
-            description={copy.preferences.spaceSmallDescription}
-            onClick={() => setDraft((current) => ({ ...current, space: "小空间" }))}
-          />
-          <OptionButton
-            active={draft.space === "中空间"}
-            label={copy.preferences.spaceMedium}
-            description={copy.preferences.spaceMediumDescription}
-            onClick={() => setDraft((current) => ({ ...current, space: "中空间" }))}
-          />
-          <OptionButton
-            active={draft.space === "大空间"}
-            label={copy.preferences.spaceLarge}
-            description={copy.preferences.spaceLargeDescription}
-            onClick={() => setDraft((current) => ({ ...current, space: "大空间" }))}
-          />
-        </div>
-      </Section>
-
-      <Section title={copy.preferences.intensityTitle}>
-        <div className="space-y-2">
-          <OptionButton
-            active={draft.intensity === "温和"}
-            label={copy.preferences.intensityGentle}
-            description={copy.preferences.intensityGentleDescription}
-            onClick={() => setDraft((current) => ({ ...current, intensity: "温和" }))}
-          />
-          <OptionButton
-            active={draft.intensity === "中等"}
-            label={copy.preferences.intensityMedium}
-            description={copy.preferences.intensityMediumDescription}
-            onClick={() => setDraft((current) => ({ ...current, intensity: "中等" }))}
-          />
         </div>
       </Section>
 
@@ -1007,48 +859,6 @@ function HomeScreen({
           <button className="w-full rounded-full bg-white/85 px-5 py-4 text-base font-semibold text-ink shadow-sm transition duration-150 hover:-translate-y-0.5 active:translate-y-0.5 active:scale-[0.99]" onClick={onTemporary} type="button">
             {copy.home.temporary}
           </button>
-        </div>
-      </section>
-    </div>
-  );
-}
-
-function ReminderDialog({
-  onStart,
-  onLater,
-  onMuteToday
-}: {
-  onStart: () => void;
-  onLater: () => void;
-  onMuteToday: () => void;
-}) {
-  return (
-    <div className="fixed inset-0 z-30 grid place-items-end bg-ink/25 px-5 py-6 backdrop-blur-sm sm:place-items-center">
-      <section className="w-full max-w-md animate-rise rounded-[8px] bg-paper p-5 shadow-soft">
-        <div className="flex items-start gap-3">
-          <div className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-moss text-leaf">
-            <Bell size={20} />
-          </div>
-          <div>
-            <p className="text-sm font-medium text-leaf">提醒闹钟</p>
-            <h2 className="mt-1 text-2xl font-semibold tracking-normal">坐太久了，换个档。</h2>
-            <p className="mt-2 text-sm leading-6 text-muted">
-              刚好停一下，做一组 30 秒动作。起来前后都行，先动一下。
-            </p>
-          </div>
-        </div>
-        <div className="mt-5 grid gap-3">
-          <button className="rounded-full bg-leaf px-5 py-4 font-semibold text-white shadow-soft" onClick={onStart} type="button">
-            开始
-          </button>
-          <div className="grid grid-cols-2 gap-3">
-            <button className="rounded-full bg-moss px-4 py-3 text-sm font-semibold text-ink" onClick={onLater} type="button">
-              稍后提醒
-            </button>
-            <button className="rounded-full bg-white/80 px-4 py-3 text-sm font-semibold text-muted" onClick={onMuteToday} type="button">
-              今天先不提醒
-            </button>
-          </div>
         </div>
       </section>
     </div>

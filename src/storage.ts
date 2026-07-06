@@ -18,8 +18,9 @@ function readJson<T>(key: string, fallback: T): T {
 }
 
 export function loadPreferences(): Preferences | null {
-  const preferences = readJson<Preferences | null>(PREFERENCES_KEY, null);
-  if (!preferences) return null;
+  const storedPreferences = readJson<(Preferences & { reminderFrequency?: unknown }) | null>(PREFERENCES_KEY, null);
+  if (!storedPreferences) return null;
+  const { reminderFrequency: _legacyReminderFrequency, ...preferences } = storedPreferences;
   const sessionDurationSec = Math.min(
     MAX_SESSION_DURATION_SEC,
     Math.max(
@@ -37,17 +38,7 @@ export function loadPreferences(): Preferences | null {
     ...preferences,
     durationMin: sessionDurationSec / 60,
     sessionDurationSec,
-    targetAreas: targetAreas.length ? targetAreas : ["肩颈"],
-    reminderFrequency:
-      preferences.reminderFrequency === "每45分钟"
-        ? "60分钟后"
-        : preferences.reminderFrequency === "每60分钟"
-          ? "60分钟后"
-          : preferences.reminderFrequency === "每90分钟"
-            ? "90分钟后"
-            : preferences.reminderFrequency === "暂不提醒"
-              ? "暂不设置"
-              : preferences.reminderFrequency
+    targetAreas: targetAreas.length ? targetAreas : ["肩颈"]
   };
 }
 
