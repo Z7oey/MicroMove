@@ -802,6 +802,13 @@ function HomeScreen({
   onStart: (mode?: MovementMode) => void;
   onTemporary: () => void;
 }) {
+  const [standingPromptOpen, setStandingPromptOpen] = useState(false);
+
+  function choosePromptMode(mode: MovementMode) {
+    setStandingPromptOpen(false);
+    onStart(mode);
+  }
+
   return (
     <div className="animate-rise space-y-6">
       <header className="flex items-center justify-between">
@@ -835,7 +842,7 @@ function HomeScreen({
           <div className="grid grid-cols-2 gap-3">
             <button
               className="flex min-h-40 flex-col rounded-[10px] border border-white/35 bg-gradient-to-br from-leaf to-[#5f7f63] px-4 py-4 text-left text-white shadow-[0_7px_0_#4f6f54,0_15px_28px_rgba(47,50,45,0.18)] transition-[transform,box-shadow] duration-150 hover:-translate-y-1 hover:shadow-[0_9px_0_#4f6f54,0_19px_34px_rgba(47,50,45,0.2)] active:translate-y-1 active:shadow-[0_2px_0_#4f6f54,0_8px_16px_rgba(47,50,45,0.14)]"
-              onClick={() => onStart("seated")}
+              onClick={() => setStandingPromptOpen(true)}
               type="button"
             >
               <span className="block text-lg font-semibold">{copy.home.startSeated}</span>
@@ -858,6 +865,71 @@ function HomeScreen({
           </section>
           <button className="w-full rounded-full bg-white/85 px-5 py-4 text-base font-semibold text-ink shadow-sm transition duration-150 hover:-translate-y-0.5 active:translate-y-0.5 active:scale-[0.99]" onClick={onTemporary} type="button">
             {copy.home.temporary}
+          </button>
+        </div>
+      </section>
+      {standingPromptOpen && (
+        <StandingPrompt
+          onSeated={() => choosePromptMode("seated")}
+          onStanding={() => choosePromptMode("standing")}
+        />
+      )}
+    </div>
+  );
+}
+
+function StandingPrompt({
+  onSeated,
+  onStanding
+}: {
+  onSeated: () => void;
+  onStanding: () => void;
+}) {
+  const [tipIndex, setTipIndex] = useState(0);
+  const currentTip = copy.home.standingPromptTips[tipIndex];
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      setTipIndex((current) => (current + 1) % copy.home.standingPromptTips.length);
+    }, 2000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  return (
+    <div className="fixed inset-0 z-30 grid place-items-end bg-ink/25 px-5 pb-[calc(env(safe-area-inset-bottom)+1rem)] pt-8 backdrop-blur-sm">
+      <section
+        aria-modal="true"
+        className="w-full max-w-md animate-rise rounded-[24px] border border-white/70 bg-white/90 p-5 shadow-[0_24px_80px_rgba(47,50,45,0.24)]"
+        role="dialog"
+      >
+        <div className="rounded-[18px] bg-moss/80 px-4 py-4">
+          <p className="text-xs font-semibold text-leaf">久坐打断提醒</p>
+          <h2 className="mt-2 text-2xl font-semibold tracking-normal">
+            {copy.home.standingPromptTitle}
+          </h2>
+          <p className="mt-3 text-sm leading-6 text-ink/75">{copy.home.standingPromptLead}</p>
+          <p
+            aria-live="polite"
+            className="mt-2 min-h-[3rem] rounded-[14px] bg-white/65 px-3 py-2 text-sm leading-6 text-ink/75 transition"
+          >
+            {currentTip}
+          </p>
+        </div>
+
+        <div className="mt-4 grid gap-3">
+          <button
+            className="min-h-14 w-full rounded-full bg-leaf px-5 py-4 text-base font-semibold text-white shadow-soft transition hover:-translate-y-0.5 active:translate-y-0.5"
+            onClick={onStanding}
+            type="button"
+          >
+            {copy.home.standingPromptStand}
+          </button>
+          <button
+            className="min-h-14 w-full rounded-full bg-paper px-5 py-4 text-base font-semibold text-ink shadow-sm transition hover:-translate-y-0.5 active:translate-y-0.5"
+            onClick={onSeated}
+            type="button"
+          >
+            {copy.home.standingPromptSit}
           </button>
         </div>
       </section>

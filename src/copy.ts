@@ -71,6 +71,16 @@ export const copy = {
     startStanding: "站着动一下",
     seatedDescription: "不方便站起时，先在座位上舒展一下",
     standingDescription: "短暂离开椅子，给身体一个间隙",
+    standingPromptTitle: "方便站起来活动吗？",
+    standingPromptLead: "连续久坐尽量别超90分钟哦；",
+    standingPromptTips: [
+      "给腰背少一点持续压力，预防腰酸背痛；",
+      "让身体换个姿势，缓解久坐后的僵硬；",
+      "加快血液流动，恢复精力upup；",
+      "想要代谢更快？主动打断久坐，比久坐后猛练30分钟更友好！"
+    ],
+    standingPromptStand: "站起来做！",
+    standingPromptSit: "这组坐着做",
     startAction: "开始 →",
     temporary: "本次调整",
     editPreferences: "修改长期偏好",
