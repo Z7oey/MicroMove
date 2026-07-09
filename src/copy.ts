@@ -153,6 +153,10 @@ export const copy = {
     historyTitle: "历史记录",
     emptyHistory: "还没有完成记录。完成一组后，这里会显示日期、时长和重点部位。",
     completedBadge: "已完成",
+    sourceLabels: {
+      home_recommendation: "首页推荐",
+      exercise_library: "动作库"
+    },
     replayCompleted: "播放此组",
     abandonedTitle: "中断记录",
     emptyAbandoned: "暂时没有中断记录。退出未完成的 session 时，这里会显示已完成时长和退出位置。",

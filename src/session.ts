@@ -2,6 +2,7 @@ import { exerciseCategories, exercises, type Exercise } from "./data/exercises";
 import type {
   AbandonedSession,
   CompletedSession,
+  CompletedSessionSource,
   MovementMode,
   Preferences,
   SessionPlan,
@@ -30,6 +31,10 @@ const PAIRED_EXERCISES: Record<string, string> = {
   lower_back_rotation_side_bend_left: "lower_back_rotation_side_bend_right",
   lower_back_rotation_side_bend_right: "lower_back_rotation_side_bend_left"
 };
+
+function completionSourceFor(plan: SessionPlan): CompletedSessionSource {
+  return plan.source === "single" ? "exercise_library" : "home_recommendation";
+}
 
 function uid(prefix: string) {
   return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
@@ -225,6 +230,7 @@ export function createCompletedSession(
 
   return {
     id: uid("done"),
+    source: completionSourceFor(plan),
     completedAt: now.toISOString(),
     date: localDateString(now),
     plannedDurationSec: plan.plannedDurationSec,

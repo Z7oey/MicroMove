@@ -47,7 +47,10 @@ export function savePreferences(preferences: Preferences) {
 }
 
 export function loadSessions(): CompletedSession[] {
-  return readJson<CompletedSession[]>(SESSIONS_KEY, []);
+  return readJson<(CompletedSession & { source?: unknown })[]>(SESSIONS_KEY, []).map((session) => ({
+    ...session,
+    source: session.source === "exercise_library" ? "exercise_library" : "home_recommendation"
+  }));
 }
 
 export function saveSessions(sessions: CompletedSession[]) {

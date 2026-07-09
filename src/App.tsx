@@ -38,6 +38,7 @@ import type { AbandonedSession, AppView, CompletedSession, MovementMode, Prefere
 import {
   averageCompletedSec,
   calculateStreak,
+  completedSessionSource,
   exportActivityCsv,
   exportActivityJson,
   formatDuration,
@@ -114,6 +115,10 @@ function fullPreferenceSummary(preferences: Preferences) {
   return preferenceSummary(preferences);
 }
 
+function completedSessionSourceLabel(session: CompletedSession) {
+  return copy.profile.sourceLabels[completedSessionSource(session)];
+}
+
 function recentCompletedExerciseIds(sessions: CompletedSession[], limit = 3) {
   return [...sessions]
     .sort((a, b) => b.completedAt.localeCompare(a.completedAt))
@@ -132,6 +137,7 @@ function App() {
     loadPreferences() ? { name: "home" } : { name: "onboarding" }
   );
   const recentlyRecommendedIds = useRef<string[]>([]);
+  const completedPlanIds = useRef(new Set<string>());
 
   const todaySec = todayTotalSec(sessions);
   const streak = calculateStreak(sessions);
@@ -198,8 +204,12 @@ function App() {
   }
 
   function completeSession(plan: AppView & { name: "player" }, actualCompletedSec: number) {
+    if (completedPlanIds.current.has(plan.session.id)) return;
+    completedPlanIds.current.add(plan.session.id);
+
     const completed = createCompletedSession(plan.session, actualCompletedSec);
     if (plan.session.source === "single") {
+      setSessions(appendSession(completed));
       setView({ name: "completion", session: completed, mode: "single" });
       return;
     }
@@ -1450,7 +1460,12 @@ function ProfileScreen({
                     {copy.common.targetPriority(areaLabels(session.targetAreas))}
                   </p>
                 </div>
-                <span className="rounded-full bg-moss px-3 py-1 text-xs text-leaf">{copy.profile.completedBadge}</span>
+                <div className="flex shrink-0 flex-col items-end gap-2">
+                  <span className="rounded-full bg-moss px-3 py-1 text-xs text-leaf">{copy.profile.completedBadge}</span>
+                  <span className="text-xs text-muted">
+                    {copy.common.source}：{completedSessionSourceLabel(session)}
+                  </span>
+                </div>
               </div>
               <div className="mt-3 flex gap-4 text-sm text-ink/75">
                 <span>{formatDuration(session.actualCompletedSec)}</span>

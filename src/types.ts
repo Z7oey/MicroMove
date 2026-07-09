@@ -19,6 +19,7 @@ export type Preferences = {
 
 export type CompletedSession = {
   id: string;
+  source: CompletedSessionSource;
   completedAt: string;
   date: string;
   plannedDurationSec: number;
@@ -27,6 +28,8 @@ export type CompletedSession = {
   targetAreas: string[];
   exerciseIds: string[];
 };
+
+export type CompletedSessionSource = "home_recommendation" | "exercise_library";
 
 export type AbandonedSession = {
   id: string;

@@ -1,4 +1,4 @@
-import type { AbandonedSession, CompletedSession } from "./types";
+import type { AbandonedSession, CompletedSession, CompletedSessionSource } from "./types";
 
 export function localDateString(date = new Date()) {
   const year = date.getFullYear();
@@ -53,6 +53,10 @@ export function calculateStreak(sessions: CompletedSession[]) {
   return streak;
 }
 
+export function completedSessionSource(session: { source?: unknown }): CompletedSessionSource {
+  return session.source === "exercise_library" ? "exercise_library" : "home_recommendation";
+}
+
 function csvCell(value: string | number) {
   const text = String(value);
   return `"${text.replaceAll('"', '""')}"`;
@@ -76,6 +80,7 @@ export function exportActivityCsv(
     "日期",
     "发生时间",
     "类型",
+    "来源",
     "计划时长",
     "实际完成时长",
     "完成动作数",
@@ -90,6 +95,7 @@ export function exportActivityCsv(
     session.date,
     session.completedAt,
     "完成",
+    completedSessionSource(session),
     formatCsvDuration(session.plannedDurationSec),
     formatCsvDuration(session.actualCompletedSec),
     session.movementCount,
@@ -104,6 +110,7 @@ export function exportActivityCsv(
     session.date,
     session.abandonedAt,
     "放弃",
+    "",
     formatCsvDuration(session.plannedDurationSec),
     formatCsvDuration(session.actualCompletedSec),
     session.completedMovementCount,
