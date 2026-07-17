@@ -1,8 +1,9 @@
-import { exerciseCategories, exercises, type Exercise } from "./data/exercises";
+import { exerciseCategories, exercises, groupIdForExercise, type Exercise } from "./data/exercises";
 import type {
   AbandonedSession,
   CompletedSession,
   CompletedSessionSource,
+  LikedExerciseGroups,
   MovementMode,
   Preferences,
   SessionPlan,
@@ -16,9 +17,16 @@ type SessionPreferences = Pick<
 > & {
   movementMode?: MovementMode;
   recentExerciseIds?: string[];
+  lastSessionFirstExerciseId?: string;
+  lastSessionExerciseIds?: string[];
+  likedExerciseGroups?: LikedExerciseGroups;
 };
 
 const RECENT_EXERCISE_LIMIT = 3;
+const MUTUALLY_EXCLUSIVE_EXERCISES: Record<string, string[]> = {
+  chest_interlaced_overhead_reach: ["chest_overhead_reach"],
+  chest_overhead_reach: ["chest_interlaced_overhead_reach"]
+};
 const PAIRED_EXERCISES: Record<string, string> = {
   neck_side_tilt_left: "neck_side_tilt_right",
   neck_side_tilt_right: "neck_side_tilt_left",
@@ -94,15 +102,36 @@ function matchCandidates(
     const candidates = pool.filter(withoutSelected);
     if (candidates.length) return candidates;
   }
-  for (const pool of prioritizedPools) {
-    const candidates = pool.filter(withoutRecent);
-    if (candidates.length) return candidates;
-  }
-  return prioritizedPools[0] ?? [];
+  return [];
 }
 
-function randomPick(candidates: Exercise[]) {
-  return candidates[Math.floor(Math.random() * candidates.length)];
+function weightedRandomPick(candidates: Exercise[], preferences: SessionPreferences, index: number) {
+  const avoidFirstId = index === 0 ? preferences.lastSessionFirstExerciseId : undefined;
+  const firstCandidates =
+    avoidFirstId && candidates.length > 1
+      ? candidates.filter((exercise) => exercise.id !== avoidFirstId)
+      : candidates;
+  const totalWeight = firstCandidates.reduce((total, exercise) => {
+    const liked = Boolean(preferences.likedExerciseGroups?.[groupIdForExercise(exercise.id)]);
+    return total + (liked ? 2.4 : 1);
+  }, 0);
+  let cursor = Math.random() * totalWeight;
+  for (const exercise of firstCandidates) {
+    const liked = Boolean(preferences.likedExerciseGroups?.[groupIdForExercise(exercise.id)]);
+    cursor -= liked ? 2.4 : 1;
+    if (cursor <= 0) return exercise;
+  }
+  return firstCandidates.at(-1);
+}
+
+function isSameExerciseSet(left: Exercise[], rightIds: string[] | undefined) {
+  if (!rightIds?.length || left.length !== rightIds.length) return false;
+  return left.every((exercise, index) => exercise.id === rightIds[index]);
+}
+
+function markExerciseSelected(exercise: Exercise, selectedIds: Set<string>) {
+  selectedIds.add(exercise.id);
+  MUTUALLY_EXCLUSIVE_EXERCISES[exercise.id]?.forEach((exerciseId) => selectedIds.add(exerciseId));
 }
 
 function pairedExerciseFor(
@@ -135,30 +164,48 @@ export function generateSession(preferences: SessionPreferences): SessionPlan {
   const safeTargets: TargetArea[] = preferences.targetAreas.length
     ? preferences.targetAreas
     : ["肩颈"];
-  const selected: Exercise[] = [];
-  const selectedIds = new Set<string>();
 
-  for (let index = 0; index < desiredCount; index += 1) {
-    const slotArea = safeTargets[index % safeTargets.length];
-    const candidates = matchCandidates(preferences, slotArea, selectedIds);
-    const remainingSlots = desiredCount - selected.length;
-    const pairableCandidates =
-      remainingSlots >= 2
-        ? candidates.filter((exercise) =>
-            Boolean(pairedExerciseFor(exercise, preferences, safeTargets, selectedIds))
-          )
-        : [];
-    const next = randomPick(pairableCandidates.length ? pairableCandidates : candidates);
-    if (!next) continue;
-    selected.push(next);
-    selectedIds.add(next.id);
-    if (selected.length < desiredCount) {
-      const paired = pairedExerciseFor(next, preferences, safeTargets, selectedIds);
-      if (paired) {
-        selected.push(paired);
-        selectedIds.add(paired.id);
-        index += 1;
+  function buildSelection() {
+    const selected: Exercise[] = [];
+    const selectedIds = new Set<string>();
+
+    for (let index = 0; index < desiredCount; index += 1) {
+      const slotArea = safeTargets[index % safeTargets.length];
+      const candidates = matchCandidates(preferences, slotArea, selectedIds);
+      const remainingSlots = desiredCount - selected.length;
+      const pairableCandidates =
+        remainingSlots >= 2
+          ? candidates.filter((exercise) =>
+              Boolean(pairedExerciseFor(exercise, preferences, safeTargets, selectedIds))
+            )
+          : [];
+      const next = weightedRandomPick(
+        pairableCandidates.length ? pairableCandidates : candidates,
+        preferences,
+        selected.length
+      );
+      if (!next) continue;
+      selected.push(next);
+      markExerciseSelected(next, selectedIds);
+      if (selected.length < desiredCount) {
+        const paired = pairedExerciseFor(next, preferences, safeTargets, selectedIds);
+        if (paired) {
+          selected.push(paired);
+          markExerciseSelected(paired, selectedIds);
+          index += 1;
+        }
       }
+    }
+
+    return selected;
+  }
+
+  let selected = buildSelection();
+  for (let attempt = 0; attempt < 4 && isSameExerciseSet(selected, preferences.lastSessionExerciseIds); attempt += 1) {
+    const retry = buildSelection();
+    if (!isSameExerciseSet(retry, preferences.lastSessionExerciseIds)) {
+      selected = retry;
+      break;
     }
   }
   const fallbackExercise = exercises.find(
@@ -175,7 +222,10 @@ export function generateSession(preferences: SessionPreferences): SessionPlan {
   };
 }
 
-export function generateSingleExerciseSession(exercise: Exercise): SessionPlan {
+export function generateSingleExerciseSession(exerciseOrExercises: Exercise | Exercise[]): SessionPlan {
+  const sessionExercises = Array.isArray(exerciseOrExercises) ? exerciseOrExercises : [exerciseOrExercises];
+  const exercise = sessionExercises[0] ?? exercises[0];
+
   return {
     id: uid("single"),
     source: "single",
@@ -186,8 +236,8 @@ export function generateSingleExerciseSession(exercise: Exercise): SessionPlan {
       space: exercise.space,
       intensity: exercise.intensity
     },
-    exercises: [exercise],
-    plannedDurationSec: exercise.duration
+    exercises: sessionExercises,
+    plannedDurationSec: sessionExercises.reduce((total, item) => total + item.duration, 0)
   };
 }
 
@@ -224,9 +274,11 @@ export function generateReplaySession(
 
 export function createCompletedSession(
   plan: SessionPlan,
-  actualCompletedSec: number
+  actualCompletedSec: number,
+  completedExerciseIds?: string[]
 ): CompletedSession {
   const now = new Date();
+  const exerciseIds = completedExerciseIds ?? plan.exercises.map((exercise) => exercise.id);
 
   return {
     id: uid("done"),
@@ -235,9 +287,9 @@ export function createCompletedSession(
     date: localDateString(now),
     plannedDurationSec: plan.plannedDurationSec,
     actualCompletedSec,
-    movementCount: plan.exercises.length,
+    movementCount: exerciseIds.length,
     targetAreas: plan.preferences.targetAreas,
-    exerciseIds: plan.exercises.map((exercise) => exercise.id)
+    exerciseIds
   };
 }
 

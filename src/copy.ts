@@ -14,6 +14,8 @@ export const copy = {
     backHome: "返回首页",
     today: "今天",
     seconds: "秒",
+    like: "喜欢",
+    unlike: "取消喜欢",
     source: "来源",
     durationMin: (durationMin: number) => `${durationMin} 分钟`,
     durationSec: (durationSec: number) => {
@@ -102,6 +104,9 @@ export const copy = {
     learnedAction: "我已学会，立刻开始拉伸",
     tips: "动作提示",
     closeTips: "关闭提示",
+    sideTransitionLabel: "换侧准备",
+    sideTransitionTitle: (nextName: string) => `准备换到 ${nextName}`,
+    cancelNextSide: "取消另一侧",
     imagePlaceholder: "动作示意图待替换"
   },
   completion: {
@@ -133,7 +138,10 @@ export const copy = {
     all: "全部",
     duration: "30秒",
     instructionTitle: "动作步骤",
-    tryExercise: "试做这个动作"
+    tryExercise: "试做这个动作",
+    startNow: "立即跟练",
+    backToLibrary: "回动作库",
+    pairedPracticeNotice: "跟练时将依次完成两侧或两个方向。"
   },
   profile: {
     eyebrow: "我的",

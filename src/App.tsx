@@ -2,10 +2,11 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   ArrowLeft,
   Check,
-  ChevronRight,
   ClipboardList,
   Download,
+  Heart,
   Home,
+  Leaf,
   LibraryBig,
   Pause,
   Play,
@@ -16,15 +17,31 @@ import {
   UserRound,
   X
 } from "lucide-react";
-import { exerciseCategories, exercises, type Exercise, type ExerciseIntensity, type ExerciseSpace } from "./data/exercises";
+import {
+  exerciseGroupById,
+  exerciseGroupExercises,
+  exerciseCategories,
+  groupIdForExercise,
+  groupMatchesCategory,
+  libraryExerciseGroups,
+  primaryExerciseForGroup,
+  type Exercise,
+  type ExerciseGroup,
+  type ExerciseIntensity,
+  type ExerciseSpace
+} from "./data/exercises";
 import {
   appendAbandonedSession,
   appendSession,
   loadAbandonedSessions,
+  loadLikedExerciseGroups,
   loadPreferences,
   loadLearnedExerciseIds,
+  loadRecommendationHistory,
   loadSessions,
   markExerciseLearned,
+  saveLikedExerciseGroups,
+  saveRecommendationHistory,
   savePreferences
 } from "./storage";
 import {
@@ -34,7 +51,16 @@ import {
   generateSession,
   generateSingleExerciseSession
 } from "./session";
-import type { AbandonedSession, AppView, CompletedSession, MovementMode, Preferences, Tab, TargetArea } from "./types";
+import type {
+  AbandonedSession,
+  AppView,
+  CompletedSession,
+  LikedExerciseGroups,
+  MovementMode,
+  Preferences,
+  Tab,
+  TargetArea
+} from "./types";
 import {
   averageCompletedSec,
   calculateStreak,
@@ -76,6 +102,18 @@ const onboardingDraft: OnboardingDraft = {
 };
 
 const durationOptions = [30, 60, 90, 120, 150, 180];
+const firstPracticeHint = "舒服就好，不必一定做满 30 秒。";
+const practiceHintOptions = [
+  "工作间隙轻轻拉伸一下，就已经很好了",
+  "有轻微拉伸感即可，不需要追求更大幅度",
+  "保持自然呼吸，让身体慢慢放松",
+  "今天愿意停下来照顾一下身体，就很不错",
+  "不需要做到标准，舒服、安全更重要",
+  "觉得不舒服时，可以随时暂停或结束",
+  "一次短短的活动，也是在打断久坐",
+  "不求一次拉到位，慢慢来更容易坚持",
+  "现在的这几十秒，也是在给身体回一点电"
+];
 const targetAreaOptions: Array<{ value: TargetArea; label: string; emoji: string }> = [
   { value: "肩颈", label: "肩颈", emoji: "💻" },
   { value: "上背", label: "上背", emoji: "🪽" },
@@ -126,17 +164,41 @@ function recentCompletedExerciseIds(sessions: CompletedSession[], limit = 3) {
     .slice(0, limit);
 }
 
+function sortGroupsByLike(groups: ExerciseGroup[], likedExerciseGroups: LikedExerciseGroups) {
+  return groups
+    .map((group, index) => ({ group, index, likedAt: likedExerciseGroups[group.id] }))
+    .sort((left, right) => {
+      if (left.likedAt && right.likedAt) return right.likedAt.localeCompare(left.likedAt);
+      if (left.likedAt) return -1;
+      if (right.likedAt) return 1;
+      return left.index - right.index;
+    })
+    .map((item) => item.group);
+}
+
+function randomPracticeHint(previousHint: string) {
+  const candidates =
+    practiceHintOptions.length > 1
+      ? practiceHintOptions.filter((hint) => hint !== previousHint)
+      : practiceHintOptions;
+  return candidates[Math.floor(Math.random() * candidates.length)] ?? firstPracticeHint;
+}
+
 function App() {
   const [preferences, setPreferences] = useState<Preferences | null>(() => loadPreferences());
   const [sessions, setSessions] = useState<CompletedSession[]>(() => loadSessions());
   const [abandonedSessions, setAbandonedSessions] = useState<AbandonedSession[]>(() =>
     loadAbandonedSessions()
   );
+  const [likedExerciseGroups, setLikedExerciseGroups] = useState<LikedExerciseGroups>(() =>
+    loadLikedExerciseGroups()
+  );
   const [activeTab, setActiveTab] = useState<Tab>("home");
   const [view, setView] = useState<AppView>(() =>
     loadPreferences() ? { name: "home" } : { name: "onboarding" }
   );
   const recentlyRecommendedIds = useRef<string[]>([]);
+  const recommendationHistoryRef = useRef(loadRecommendationHistory());
   const completedPlanIds = useRef(new Set<string>());
 
   const todaySec = todayTotalSec(sessions);
@@ -154,6 +216,24 @@ function App() {
       firstExerciseId,
       ...recentlyRecommendedIds.current.filter((id) => id !== firstExerciseId)
     ].slice(0, 3);
+    recommendationHistoryRef.current = {
+      lastSessionFirstExerciseId: firstExerciseId,
+      lastSessionExerciseIds: plan.exercises.map((exercise) => exercise.id)
+    };
+    saveRecommendationHistory(recommendationHistoryRef.current);
+  }
+
+  function toggleLikedExerciseGroup(groupId: string) {
+    setLikedExerciseGroups((current) => {
+      const next = { ...current };
+      if (next[groupId]) {
+        delete next[groupId];
+      } else {
+        next[groupId] = new Date().toISOString();
+      }
+      saveLikedExerciseGroups(next);
+      return next;
+    });
   }
 
   function persistPreferences(draft: PreferenceDraft, returnTo: "home" | "profile" = "home") {
@@ -182,11 +262,17 @@ function App() {
           ...preferences,
           movementMode: mode,
           space: spaceOverride,
-          recentExerciseIds: recommendationHistory()
+          recentExerciseIds: recommendationHistory(),
+          lastSessionFirstExerciseId: recommendationHistoryRef.current.lastSessionFirstExerciseId,
+          lastSessionExerciseIds: recommendationHistoryRef.current.lastSessionExerciseIds,
+          likedExerciseGroups
         }
       : {
           ...preferences,
-          recentExerciseIds: recommendationHistory()
+          recentExerciseIds: recommendationHistory(),
+          lastSessionFirstExerciseId: recommendationHistoryRef.current.lastSessionFirstExerciseId,
+          lastSessionExerciseIds: recommendationHistoryRef.current.lastSessionExerciseIds,
+          likedExerciseGroups
         };
     const plan = generateSession(modePreferences);
     rememberRecommendation(plan);
@@ -197,17 +283,24 @@ function App() {
     const plan = generateSession({
       ...draft,
       movementMode: draft.movementMode ?? "seated",
-      recentExerciseIds: recommendationHistory()
+      recentExerciseIds: recommendationHistory(),
+      lastSessionFirstExerciseId: recommendationHistoryRef.current.lastSessionFirstExerciseId,
+      lastSessionExerciseIds: recommendationHistoryRef.current.lastSessionExerciseIds,
+      likedExerciseGroups
     });
     rememberRecommendation(plan);
     setView({ name: "player", session: { ...plan, source: "temporary" } });
   }
 
-  function completeSession(plan: AppView & { name: "player" }, actualCompletedSec: number) {
+  function completeSession(
+    plan: AppView & { name: "player" },
+    actualCompletedSec: number,
+    completedExerciseIds?: string[]
+  ) {
     if (completedPlanIds.current.has(plan.session.id)) return;
     completedPlanIds.current.add(plan.session.id);
 
-    const completed = createCompletedSession(plan.session, actualCompletedSec);
+    const completed = createCompletedSession(plan.session, actualCompletedSec, completedExerciseIds);
     if (plan.session.source === "single") {
       setSessions(appendSession(completed));
       setView({ name: "completion", session: completed, mode: "single" });
@@ -259,10 +352,14 @@ function App() {
       <Shell hideNav>
         <ExercisePlayer
           session={view}
-          onComplete={(actualCompletedSec) => completeSession(view, actualCompletedSec)}
+          likedExerciseGroups={likedExerciseGroups}
+          onComplete={(actualCompletedSec, completedExerciseIds) =>
+            completeSession(view, actualCompletedSec, completedExerciseIds)
+          }
           onExit={(actualCompletedSec, currentExerciseIndex) =>
             abandonSession(view, actualCompletedSec, currentExerciseIndex)
           }
+          onToggleLike={toggleLikedExerciseGroup}
         />
       </Shell>
     );
@@ -275,6 +372,7 @@ function App() {
           session={view.session}
           sessions={sessions}
           mode={view.mode}
+          likedExerciseGroups={likedExerciseGroups}
           onHome={() => {
             setActiveTab(view.mode === "single" ? "library" : "home");
             setView({ name: "home" });
@@ -292,6 +390,47 @@ function App() {
             }
             startFromPreferences(view.movementMode);
           }}
+          onToggleLike={toggleLikedExerciseGroup}
+        />
+      </Shell>
+    );
+  }
+
+  if (view.name === "library-detail") {
+    const group = exerciseGroupById(view.groupId);
+    if (!group) {
+      return (
+        <Shell hideNav>
+          <button
+            className="inline-flex min-h-10 items-center gap-1.5 rounded-full px-1 text-sm font-semibold text-ink"
+            onClick={() => {
+              setActiveTab("library");
+              setView({ name: "home" });
+            }}
+            type="button"
+          >
+            <ArrowLeft size={18} />
+            {copy.common.back}
+          </button>
+        </Shell>
+      );
+    }
+    return (
+      <Shell hideNav>
+        <LibraryDetail
+          group={group}
+          likedAt={likedExerciseGroups[group.id]}
+          onBack={() => {
+            setActiveTab("library");
+            setView({ name: "home" });
+          }}
+          onStart={(exercisesForSession) =>
+            setView({
+              name: "player",
+              session: generateSingleExerciseSession(exercisesForSession)
+            })
+          }
+          onToggleLike={() => toggleLikedExerciseGroup(group.id)}
         />
       </Shell>
     );
@@ -345,9 +484,9 @@ function App() {
       )}
       {activeTab === "library" && (
         <LibraryScreen
-          onTry={(exercise) =>
-            setView({ name: "player", session: generateSingleExerciseSession(exercise) })
-          }
+          likedExerciseGroups={likedExerciseGroups}
+          onOpen={(group) => setView({ name: "library-detail", groupId: group.id })}
+          onToggleLike={toggleLikedExerciseGroup}
         />
       )}
       {activeTab === "profile" && (
@@ -958,29 +1097,133 @@ function Stat({ label, value, quiet = false }: { label: string; value: string; q
 
 function ExercisePlayer({
   session,
+  likedExerciseGroups,
   onComplete,
-  onExit
+  onExit,
+  onToggleLike
 }: {
   session: AppView & { name: "player" };
-  onComplete: (actualCompletedSec: number) => void;
+  likedExerciseGroups: LikedExerciseGroups;
+  onComplete: (actualCompletedSec: number, completedExerciseIds?: string[]) => void;
   onExit: (actualCompletedSec: number, currentExerciseIndex: number) => void;
+  onToggleLike: (groupId: string) => void;
 }) {
   const [index, setIndex] = useState(0);
   const learnedExerciseIds = useRef(new Set(loadLearnedExerciseIds()));
   const initialExercise = session.session.exercises[0];
-  const [phase, setPhase] = useState<"learning" | "exercise">(() =>
-    learnedExerciseIds.current.has(initialExercise?.id) ? "exercise" : "learning"
+  const [phase, setPhase] = useState<"learning" | "transition" | "exercise">(() =>
+    session.session.source === "single" || learnedExerciseIds.current.has(initialExercise?.id)
+      ? "exercise"
+      : "learning"
   );
   const [learningRemainingSec, setLearningRemainingSec] = useState(10);
+  const [transitionRemainingSec, setTransitionRemainingSec] = useState(3);
   const [remainingSec, setRemainingSec] = useState(() => initialExercise?.duration ?? 30);
   const [running, setRunning] = useState(true);
+  const [practiceHint, setPracticeHint] = useState(firstPracticeHint);
+  const [practiceHintVisible, setPracticeHintVisible] = useState(true);
   const [actualCompletedSec, setActualCompletedSec] = useState(0);
   const [finished, setFinished] = useState(false);
   const [tipsOpen, setTipsOpen] = useState(false);
   const wasRunningBeforeTips = useRef(true);
+  const completedExerciseIds = useRef<string[]>([]);
+  const hintMainTimer = useRef<number | undefined>(undefined);
+  const hintFadeTimer = useRef<number | undefined>(undefined);
+  const hintStartedAt = useRef(0);
+  const hintRemainingMs = useRef(6000);
+  const lastPracticeHint = useRef(firstPracticeHint);
+  const runningRef = useRef(running);
+  const phaseRef = useRef(phase);
+  const finishedRef = useRef(finished);
   const current = session.session.exercises[index];
   const total = session.session.exercises.length;
   const exerciseDurationSec = current.duration;
+  const currentGroupId = groupIdForExercise(current.id);
+  const currentLiked = Boolean(likedExerciseGroups[currentGroupId]);
+  const usesLibrarySideTransition = session.session.source === "single" && total > 1;
+  const exitLabel = session.session.source === "single" ? copy.library.backToLibrary : copy.common.backHome;
+
+  useEffect(() => {
+    runningRef.current = running;
+    phaseRef.current = phase;
+    finishedRef.current = finished;
+  }, [finished, phase, running]);
+
+  function recordCompletedExercise(exerciseId: string) {
+    if (completedExerciseIds.current.includes(exerciseId)) return completedExerciseIds.current;
+    completedExerciseIds.current = [...completedExerciseIds.current, exerciseId];
+    return completedExerciseIds.current;
+  }
+
+  function clearPracticeHintTimers() {
+    if (hintMainTimer.current) {
+      window.clearTimeout(hintMainTimer.current);
+      hintMainTimer.current = undefined;
+    }
+    if (hintFadeTimer.current) {
+      window.clearTimeout(hintFadeTimer.current);
+      hintFadeTimer.current = undefined;
+    }
+  }
+
+  function resetPracticeHint() {
+    clearPracticeHintTimers();
+    hintRemainingMs.current = 6000;
+    lastPracticeHint.current = firstPracticeHint;
+    setPracticeHint(firstPracticeHint);
+    setPracticeHintVisible(true);
+  }
+
+  function pausePracticeHintTimer() {
+    if (hintMainTimer.current) {
+      window.clearTimeout(hintMainTimer.current);
+      hintMainTimer.current = undefined;
+      hintRemainingMs.current = Math.max(0, hintRemainingMs.current - (Date.now() - hintStartedAt.current));
+    }
+    if (hintFadeTimer.current) {
+      window.clearTimeout(hintFadeTimer.current);
+      hintFadeTimer.current = undefined;
+      setPracticeHintVisible(true);
+    }
+  }
+
+  function startPracticeHintTimer() {
+    clearPracticeHintTimers();
+    hintStartedAt.current = Date.now();
+    hintMainTimer.current = window.setTimeout(() => {
+      hintMainTimer.current = undefined;
+      setPracticeHintVisible(false);
+      hintFadeTimer.current = window.setTimeout(() => {
+        hintFadeTimer.current = undefined;
+        const nextHint = randomPracticeHint(lastPracticeHint.current);
+        lastPracticeHint.current = nextHint;
+        hintRemainingMs.current = 5000;
+        setPracticeHint(nextHint);
+        setPracticeHintVisible(true);
+        if (runningRef.current && phaseRef.current === "exercise" && !finishedRef.current) {
+          startPracticeHintTimer();
+        }
+      }, 260);
+    }, hintRemainingMs.current);
+  }
+
+  useEffect(() => {
+    resetPracticeHint();
+    return clearPracticeHintTimers;
+  }, [current.id]);
+
+  useEffect(() => {
+    if (phase !== "exercise" || finished) {
+      pausePracticeHintTimer();
+      return undefined;
+    }
+    if (!running) {
+      pausePracticeHintTimer();
+      return undefined;
+    }
+    startPracticeHintTimer();
+    return pausePracticeHintTimer;
+  }, [current.id, finished, phase, running]);
 
   useEffect(() => {
     if (!running || finished) return undefined;
@@ -996,33 +1239,40 @@ function ExercisePlayer({
         });
         return;
       }
+      if (phase === "transition") {
+        setTransitionRemainingSec((currentRemaining) => {
+          if (currentRemaining > 1) return currentRemaining - 1;
+          showExercise(Math.min(index + 1, total - 1));
+          return 3;
+        });
+        return;
+      }
       setRemainingSec((currentRemaining) => {
         const nextRemaining = currentRemaining - 1;
         setActualCompletedSec((currentActual) => {
           const nextActual = currentActual + 1;
+          const nextCompletedIds = nextRemaining <= 0
+            ? recordCompletedExercise(current.id)
+            : completedExerciseIds.current;
           if (nextRemaining <= 0 && index >= total - 1) {
             setFinished(true);
             setRunning(false);
-            window.setTimeout(() => onComplete(nextActual), 0);
+            window.setTimeout(() => onComplete(nextActual, nextCompletedIds), 0);
           }
           return nextActual;
         });
 
         if (nextRemaining <= 0) {
           if (index < total - 1) {
-            window.setTimeout(() => {
-              const nextExercise = session.session.exercises[index + 1];
-              const nextIndex = Math.min(index + 1, total - 1);
-              setIndex(nextIndex);
-              setTipsOpen(false);
-              if (nextExercise && !learnedExerciseIds.current.has(nextExercise.id)) {
-                setPhase("learning");
-                setLearningRemainingSec(10);
-              } else {
-                setPhase("exercise");
-                setRemainingSec(nextExercise?.duration ?? 30);
-              }
-            }, 0);
+            if (usesLibrarySideTransition) {
+              window.setTimeout(() => {
+                setTipsOpen(false);
+                setPhase("transition");
+                setTransitionRemainingSec(3);
+              }, 0);
+            } else {
+              window.setTimeout(() => showExercise(index + 1), 0);
+            }
           }
           return current.duration;
         }
@@ -1030,11 +1280,12 @@ function ExercisePlayer({
       });
     }, 1000);
     return () => window.clearInterval(timer);
-  }, [current.id, current.duration, finished, index, onComplete, phase, running, session.session.exercises, total]);
+  }, [current.id, current.duration, finished, index, onComplete, phase, running, total, usesLibrarySideTransition]);
 
   function startExercise() {
     learnedExerciseIds.current.add(current.id);
     markExerciseLearned(current.id);
+    resetPracticeHint();
     setPhase("exercise");
     setRemainingSec(current.duration);
     setRunning(true);
@@ -1046,7 +1297,7 @@ function ExercisePlayer({
     setIndex(nextIndex);
     setTipsOpen(false);
     setRunning(true);
-    if (learnedExerciseIds.current.has(nextExercise.id)) {
+    if (session.session.source === "single" || learnedExerciseIds.current.has(nextExercise.id)) {
       setPhase("exercise");
       setRemainingSec(nextExercise.duration);
     } else {
@@ -1069,15 +1320,36 @@ function ExercisePlayer({
     if (index >= total - 1) {
       setFinished(true);
       setRunning(false);
-      onComplete(actualCompletedSec);
+      onComplete(actualCompletedSec, completedExerciseIds.current);
+      return;
+    }
+    if (usesLibrarySideTransition) {
+      setTipsOpen(false);
+      setPhase("transition");
+      setTransitionRemainingSec(3);
+      setRunning(true);
       return;
     }
     showExercise(index + 1);
   }
 
+  function cancelNextSide() {
+    setFinished(true);
+    setRunning(false);
+    onComplete(actualCompletedSec, completedExerciseIds.current);
+  }
+
   function restart() {
+    resetPracticeHint();
     setRemainingSec(exerciseDurationSec);
     setRunning(true);
+    if (phase === "exercise" && running && !finished) {
+      window.setTimeout(() => {
+        if (runningRef.current && phaseRef.current === "exercise" && !finishedRef.current) {
+          startPracticeHintTimer();
+        }
+      }, 0);
+    }
   }
 
   function openTips() {
@@ -1103,11 +1375,18 @@ function ExercisePlayer({
             type="button"
           >
             <ArrowLeft size={18} />
-            {copy.common.backHome}
+            {exitLabel}
           </button>
-          <span className="rounded-full bg-moss px-3 py-1 text-xs font-semibold text-leaf">
-            {copy.player.progress(index + 1, total)}
-          </span>
+          <div className="flex items-center gap-2">
+            <LikeButton
+              liked={currentLiked}
+              label={currentLiked ? copy.common.unlike : copy.common.like}
+              onClick={() => onToggleLike(currentGroupId)}
+            />
+            <span className="rounded-full bg-moss px-3 py-1 text-xs font-semibold text-leaf">
+              {copy.player.progress(index + 1, total)}
+            </span>
+          </div>
         </header>
 
         <section className="text-center">
@@ -1136,8 +1415,33 @@ function ExercisePlayer({
     );
   }
 
+  if (phase === "transition") {
+    const nextExercise = session.session.exercises[Math.min(index + 1, total - 1)];
+    return (
+      <div className="flex min-h-[calc(100svh-24px)] animate-rise flex-col items-center justify-center gap-8 pb-[calc(env(safe-area-inset-bottom)+0.5rem)] text-center">
+        <div className="space-y-3">
+          <p className="text-sm font-semibold text-leaf">{copy.player.sideTransitionLabel}</p>
+          <h1 className="text-3xl font-semibold tracking-normal">
+            {copy.player.sideTransitionTitle(nextExercise?.name ?? "")}
+          </h1>
+          <p className="text-8xl font-semibold leading-none tabular-nums text-leaf">
+            {transitionRemainingSec}
+          </p>
+        </div>
+        {nextExercise && <ExerciseImage exercise={nextExercise} />}
+        <button
+          className="mt-6 rounded-full bg-white/80 px-5 py-3 text-sm font-semibold text-muted shadow-sm"
+          onClick={cancelNextSide}
+          type="button"
+        >
+          {copy.player.cancelNextSide}
+        </button>
+      </div>
+    );
+  }
+
   return (
-    <div className="relative flex min-h-[calc(100svh-24px)] animate-rise flex-col gap-3 pb-[calc(env(safe-area-inset-bottom)+0.35rem)]">
+    <div className="relative flex min-h-[calc(100svh-24px)] animate-rise flex-col gap-2 pb-[calc(env(safe-area-inset-bottom)+0.35rem)]">
       <header className="flex items-center justify-between pb-0.5">
         <button
           className="inline-flex min-h-9 items-center justify-center gap-1.5 rounded-full px-1 py-1 text-sm font-semibold text-ink"
@@ -1145,14 +1449,30 @@ function ExercisePlayer({
           type="button"
         >
           <ArrowLeft size={18} />
-          {copy.common.backHome}
+          {exitLabel}
         </button>
-        <span className="rounded-full bg-moss px-3 py-1 text-xs font-semibold text-leaf">
-          {copy.player.progress(index + 1, total)}
-        </span>
+        <div className="flex items-center gap-2">
+          <LikeButton
+            liked={currentLiked}
+            label={currentLiked ? copy.common.unlike : copy.common.like}
+            onClick={() => onToggleLike(currentGroupId)}
+          />
+          <span className="rounded-full bg-moss px-3 py-1 text-xs font-semibold text-leaf">
+            {copy.player.progress(index + 1, total)}
+          </span>
+        </div>
       </header>
 
-      <section className="flex flex-1 flex-col justify-center gap-4 py-1">
+      <p
+        className={cn(
+          "mx-auto min-h-6 max-w-full overflow-hidden text-ellipsis whitespace-nowrap px-1 text-center text-[clamp(14px,3.75vw,16px)] font-medium leading-6 text-leaf/75 transition-opacity duration-300",
+          practiceHintVisible ? "opacity-100" : "opacity-0"
+        )}
+      >
+        {practiceHint}
+      </p>
+
+      <section className="flex flex-1 flex-col justify-start gap-3 py-0">
         <ExerciseImage exercise={current} immersive />
         <div className="text-center">
           <p className="text-6xl font-semibold leading-none tabular-nums text-leaf">{remainingSec}</p>
@@ -1269,18 +1589,74 @@ function IconButton({
   );
 }
 
+function LikeButton({
+  liked,
+  label,
+  onClick,
+  className
+}: {
+  liked: boolean;
+  label: string;
+  onClick: () => void;
+  className?: string;
+}) {
+  return (
+    <button
+      aria-label={label}
+      className={cn(
+        "grid h-10 w-10 shrink-0 place-items-center rounded-full bg-white/85 text-muted shadow-sm transition hover:bg-white",
+        liked && "text-[#d94d5c]",
+        className
+      )}
+      onClick={onClick}
+      type="button"
+    >
+      <Heart fill={liked ? "currentColor" : "none"} size={19} />
+    </button>
+  );
+}
+
+function DetailHeroImage({ exercise }: { exercise: Exercise }) {
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    setFailed(false);
+  }, [exercise.id, exercise.coverImage]);
+
+  return (
+    <div className="relative h-[clamp(208px,25svh,224px)] w-full overflow-hidden rounded-[18px] bg-white shadow-soft">
+      {!failed ? (
+        <img
+          alt={exercise.name}
+          className="h-full w-full object-contain"
+          onError={() => setFailed(true)}
+          src={exercise.coverImage}
+        />
+      ) : (
+        <div aria-label={copy.player.imagePlaceholder} className="grid h-full w-full place-items-center bg-moss/70 px-5 text-center text-sm leading-6 text-leaf">
+          {copy.player.imagePlaceholder}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function Completion({
   session,
   sessions,
   mode,
+  likedExerciseGroups,
   onHome,
-  onAgain
+  onAgain,
+  onToggleLike
 }: {
   session: CompletedSession;
   sessions: CompletedSession[];
   mode: "regular" | "single" | "replay";
+  likedExerciseGroups: LikedExerciseGroups;
   onHome: () => void;
   onAgain: () => void;
+  onToggleLike: (groupId: string) => void;
 }) {
   const modeLabel =
     mode === "single" ? copy.completion.singleMode : mode === "replay" ? copy.completion.replayMode : copy.completion.regularMode;
@@ -1291,12 +1667,22 @@ function Completion({
     mode === "regular"
       ? copy.completion.regularFeedback
       : copy.completion.feedback[session.movementCount % copy.completion.feedback.length];
+  const primaryGroupId = session.exerciseIds[0] ? groupIdForExercise(session.exerciseIds[0]) : undefined;
 
   return (
     <div className="flex min-h-[calc(100svh-40px)] animate-rise flex-col justify-between gap-8 py-6">
       <section className="space-y-5">
-        <div className="inline-flex h-14 w-14 items-center justify-center rounded-full bg-moss text-leaf">
-          <Check size={28} />
+        <div className="flex items-center justify-between">
+          <div className="inline-flex h-14 w-14 items-center justify-center rounded-full bg-moss text-leaf">
+            <Check size={28} />
+          </div>
+          {primaryGroupId && (
+            <LikeButton
+              liked={Boolean(likedExerciseGroups[primaryGroupId])}
+              label={likedExerciseGroups[primaryGroupId] ? copy.common.unlike : copy.common.like}
+              onClick={() => onToggleLike(primaryGroupId)}
+            />
+          )}
         </div>
         <div className="space-y-2">
           {mode !== "regular" && <p className="text-sm font-medium text-leaf">{modeLabel}</p>}
@@ -1327,9 +1713,22 @@ function Completion({
   );
 }
 
-function LibraryScreen({ onTry }: { onTry: (exercise: Exercise) => void }) {
+function LibraryScreen({
+  likedExerciseGroups,
+  onOpen,
+  onToggleLike
+}: {
+  likedExerciseGroups: LikedExerciseGroups;
+  onOpen: (group: ExerciseGroup) => void;
+  onToggleLike: (groupId: string) => void;
+}) {
   const [filter, setFilter] = useState<TargetArea | typeof copy.library.all>(copy.library.all);
-  const filtered = filter === copy.library.all ? exercises : exercises.filter((exercise) => exercise.category === filter);
+  const filtered = useMemo(() => {
+    const groups = filter === copy.library.all
+      ? libraryExerciseGroups()
+      : libraryExerciseGroups().filter((group) => groupMatchesCategory(group, filter));
+    return sortGroupsByLike(groups, likedExerciseGroups);
+  }, [filter, likedExerciseGroups]);
 
   return (
     <div className="animate-rise space-y-5">
@@ -1355,16 +1754,19 @@ function LibraryScreen({ onTry }: { onTry: (exercise: Exercise) => void }) {
       </div>
 
       <section className="space-y-3">
-        {filtered.map((exercise) => (
-          <article className="overflow-hidden rounded-[8px] bg-white/80 shadow-soft" key={exercise.id}>
+        {filtered.map((group) => {
+          const exercise = primaryExerciseForGroup(group);
+          const isLiked = Boolean(likedExerciseGroups[group.id]);
+          return (
+          <article className="relative overflow-hidden rounded-[8px] bg-white/80 shadow-soft" key={group.id}>
             <button
-              className="grid w-full grid-cols-[112px_1fr_auto] gap-3 p-3 text-left"
-              onClick={() => onTry(exercise)}
+              className="grid w-full grid-cols-[112px_1fr] gap-3 p-3 pr-14 text-left"
+              onClick={() => onOpen(group)}
               type="button"
             >
               <ExerciseImage exercise={exercise} />
               <div className="min-w-0">
-                <h2 className="font-semibold">{exercise.name}</h2>
+                <h2 className="font-semibold">{group.name}</h2>
                 <p className="mt-1 line-clamp-2 text-xs leading-5 text-muted">
                   {exercise.category} · {exercise.targetMuscles}
                 </p>
@@ -1372,11 +1774,127 @@ function LibraryScreen({ onTry }: { onTry: (exercise: Exercise) => void }) {
                   {copy.common.durationSec(exercise.duration)} · {exercise.posture} · {exercise.space} · {exercise.intensity}
                 </p>
               </div>
-              <ChevronRight className="mt-2 shrink-0 text-muted" size={18} />
             </button>
+            <LikeButton
+              className="absolute right-3 top-3"
+              liked={isLiked}
+              label={isLiked ? copy.common.unlike : copy.common.like}
+              onClick={() => onToggleLike(group.id)}
+            />
           </article>
-        ))}
+        );
+        })}
       </section>
+    </div>
+  );
+}
+
+function LibraryDetail({
+  group,
+  likedAt,
+  onBack,
+  onStart,
+  onToggleLike
+}: {
+  group: ExerciseGroup;
+  likedAt?: string;
+  onBack: () => void;
+  onStart: (exercisesForSession: Exercise[]) => void;
+  onToggleLike: () => void;
+}) {
+  const primaryExercise = primaryExerciseForGroup(group);
+  const sessionExercises = exerciseGroupExercises(group);
+  const isPaired = sessionExercises.length > 1;
+
+  return (
+    <div className="flex min-h-[calc(100svh-24px)] animate-rise flex-col gap-2.5 pb-[calc(env(safe-area-inset-bottom)+0.3rem)]">
+      <header className="flex items-center justify-between pb-0.5">
+        <button
+          className="inline-flex min-h-10 items-center gap-1.5 rounded-full px-1 text-lg font-semibold text-ink"
+          onClick={onBack}
+          type="button"
+        >
+          <ArrowLeft size={22} strokeWidth={2.4} />
+          {copy.common.back}
+        </button>
+        <LikeButton
+          className="h-10 w-10 bg-transparent shadow-none"
+          liked={Boolean(likedAt)}
+          label={likedAt ? copy.common.unlike : copy.common.like}
+          onClick={onToggleLike}
+        />
+      </header>
+
+      <DetailHeroImage exercise={primaryExercise} />
+
+      <section className="space-y-2.5 px-1">
+        <div className="space-y-1.5">
+          <h1 className="text-[29px] font-semibold leading-[1.1] tracking-normal text-ink">
+            {group.name}
+          </h1>
+          <p className="flex flex-wrap items-center gap-x-2.5 gap-y-0.5 text-base leading-[1.4] text-muted">
+            <Leaf className="text-leaf" size={20} />
+            <span>{primaryExercise.category}</span>
+            <span aria-hidden="true">·</span>
+            <span>{primaryExercise.targetMuscles}</span>
+            <span aria-hidden="true">·</span>
+            <span>{primaryExercise.posture}</span>
+            <span aria-hidden="true">·</span>
+            <span>{copy.common.durationSec(primaryExercise.duration)}</span>
+            <span aria-hidden="true">·</span>
+            <span>{primaryExercise.space}</span>
+            <span aria-hidden="true">·</span>
+            <span>{primaryExercise.intensity}</span>
+          </p>
+        </div>
+        {isPaired && (
+          <p className="flex items-center gap-2 rounded-[8px] bg-moss/70 px-3.5 py-2 text-base font-semibold leading-[1.35] text-leaf">
+            <Leaf className="shrink-0" size={19} />
+            {copy.library.pairedPracticeNotice}
+          </p>
+        )}
+      </section>
+
+      <section className="border-t border-black/5 px-1 pt-3">
+        <div className="flex items-center gap-2.5">
+          <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-leaf text-white">
+            <ClipboardList size={17} />
+          </span>
+          <h2 className="text-xl font-semibold tracking-normal">{copy.library.instructionTitle}</h2>
+        </div>
+        <ol className="mt-2 space-y-1.5">
+          {primaryExercise.instructions.map((item, index) => (
+            <li className="grid grid-cols-[29px_1fr] items-start gap-3 text-base leading-[1.42] text-ink/85" key={item}>
+              <span className="grid h-7 w-7 place-items-center rounded-full bg-leaf text-sm font-semibold text-white">
+                {index + 1}
+              </span>
+              <span>{item}</span>
+            </li>
+          ))}
+        </ol>
+      </section>
+
+      <section className="rounded-[8px] bg-coral/15 px-4 py-2.5">
+        <div className="flex items-center gap-2.5">
+          <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-coral text-white">
+            <ShieldCheck size={17} />
+          </span>
+          <h2 className="text-xl font-semibold tracking-normal text-[#a85f51]">{copy.player.safetyTitle}</h2>
+        </div>
+        <ul className="mt-1.5 list-disc space-y-0.5 pl-6 text-base leading-[1.42] text-ink/80">
+          {primaryExercise.safetyTips.map((item) => (
+            <li key={item}>{item}</li>
+          ))}
+        </ul>
+      </section>
+
+      <button
+        className="min-h-13 w-full rounded-full bg-leaf px-5 py-3 text-lg font-semibold text-white shadow-soft transition active:scale-[0.99]"
+        onClick={() => onStart(sessionExercises)}
+        type="button"
+      >
+        {copy.library.startNow}
+      </button>
     </div>
   );
 }
@@ -1546,7 +2064,7 @@ function ExerciseImage({
       className={cn(
         "relative grid shrink-0 place-items-center overflow-hidden rounded-[8px]",
         immersive
-          ? "aspect-square w-full bg-white shadow-soft"
+          ? "w-full bg-white shadow-soft"
           : large
             ? "w-full bg-white shadow-soft"
             : "h-24 w-28 bg-moss/70"
@@ -1555,7 +2073,7 @@ function ExerciseImage({
       {!failed ? (
         <img
           alt={exercise.name}
-          className={immersive ? "h-full w-full object-contain" : large ? "block h-auto w-full" : "h-full w-full object-cover"}
+          className={immersive || large ? "block h-auto w-full" : "h-full w-full object-cover"}
           onError={() => setFailed(true)}
           src={imageSrc}
         />

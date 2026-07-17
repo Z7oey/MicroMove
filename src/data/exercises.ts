@@ -20,6 +20,13 @@ export type Exercise = {
   coverImage: string;
 };
 
+export type ExerciseGroup = {
+  id: string;
+  name: string;
+  exerciseIds: string[];
+  primaryExerciseId: string;
+};
+
 export const exerciseCategories: ExerciseCategory[] = ["肩颈", "上背", "胸肩", "腰背"];
 
 export const exercises: Exercise[] = [
@@ -30,13 +37,13 @@ export const exercises: Exercise[] = [
     targetMuscles: "上斜方肌",
     instructions: [
       "身体坐直或站直，肩膀自然下沉。",
-      "头慢慢向右侧倾斜，让右耳靠近右肩。",
-      "感到左侧颈部轻微拉伸后停住，结束后换另一侧。"
+      "头部缓慢向右侧倾斜，让右耳朝右肩方向靠近；需要时，可将右手轻放在头侧，稍作辅助。",
+      "感受左侧颈部轻微拉伸，保持均匀呼吸。"
     ],
     safetyTips: [
-      "不要压头猛拉。",
-      "有轻微拉伸感即可。",
-      "如果出现疼痛、麻木或头晕，请立即停止。"
+      "避免用手向下压头或突然加力。",
+      "肩膀保持放松，以轻微拉伸感为宜。",
+      "出现疼痛、麻木或头晕时，及时停止动作。"
     ],
     duration: 30,
     posture: "坐姿/站姿",
@@ -53,13 +60,13 @@ export const exercises: Exercise[] = [
     targetMuscles: "上斜方肌",
     instructions: [
       "身体坐直或站直，肩膀自然下沉。",
-      "头慢慢向左侧倾斜，让左耳靠近左肩。",
-      "感到右侧颈部轻微拉伸后停住，结束后换另一侧。"
+      "头部缓慢向左侧倾斜，让左耳朝左肩方向靠近；需要时，可将左手轻放在头侧，稍作辅助。",
+      "感受右侧颈部轻微拉伸，保持均匀呼吸。"
     ],
     safetyTips: [
-      "不要压头猛拉。",
-      "有轻微拉伸感即可。",
-      "如果出现疼痛、麻木或头晕，请立即停止。"
+      "避免用手向下压头或突然加力。",
+      "肩膀保持放松，以轻微拉伸感为宜。",
+      "出现疼痛、麻木或头晕时，及时停止动作。"
     ],
     duration: 30,
     posture: "坐姿/站姿",
@@ -75,14 +82,14 @@ export const exercises: Exercise[] = [
     name: "低头后颈放松",
     targetMuscles: "颈后伸肌群 / 枕下肌群",
     instructions: [
-      "坐直，肩膀自然下沉。",
-      "慢慢把下巴靠近胸口，感受后颈被轻轻拉开。",
-      "保持呼吸，再慢慢回正。"
+      "坐直或站直，肩膀自然下沉。",
+      "慢慢低头，让下巴靠近胸口；需要时，可将手轻放在后脑勺，稍作辅助。",
+      "感受后颈被轻轻拉开，保持均匀呼吸。"
     ],
     safetyTips: [
-      "不要用手把头往下压。",
-      "有颈椎问题者请谨慎。",
-      "如出现不适，请立即停止。"
+      "避免用手向下压头或突然加力。",
+      "颈部已有明显疼痛或活动受限时，减小幅度并谨慎尝试。",
+      "出现疼痛、麻木或头晕时，及时停止动作。"
     ],
     duration: 30,
     posture: "坐姿/站姿",
@@ -98,14 +105,14 @@ export const exercises: Exercise[] = [
     name: "抬头前颈放松",
     targetMuscles: "胸锁乳突肌 / 斜角肌",
     instructions: [
-      "双手合十，拇指轻放在下颌处。",
-      "轻轻向上、向后引导头部，感受前颈被拉开。",
-      "保持 5–10 秒，均匀呼吸，再慢慢回正。"
+      "坐直或站直，肩膀自然下沉。",
+      "双手轻放在下颌附近，缓慢抬高视线，让头部轻轻向后延展。",
+      "感受前颈轻微拉伸，保持均匀呼吸，再慢慢回正。"
     ],
     safetyTips: [
-      "不要猛仰头，不要过度用力。",
-      "如果出现头晕、刺痛或前颈不适，请立即停止。",
-      "动作以轻微牵拉感为宜。"
+      "避免猛然仰头或用手推压下颌。",
+      "动作幅度以颈部舒适为准。",
+      "出现头晕、刺痛或前颈不适时，及时停止动作。"
     ],
     duration: 30,
     posture: "坐姿/站姿",
@@ -126,9 +133,9 @@ export const exercises: Exercise[] = [
       "感受肩胛骨之间和上背被拉开，保持均匀呼吸。"
     ],
     safetyTips: [
-      "不要低头过度，颈部保持放松。",
-      "背部不适时减小拱背幅度。",
-      "动作以轻微牵拉感为宜。"
+      "避免过度低头，颈部保持自然放松。",
+      "背部不适时，减小前推和拱背幅度。",
+      "以肩胛骨之间出现轻微牵拉感为宜。"
     ],
     duration: 30,
     posture: "坐姿/站姿",
@@ -144,14 +151,14 @@ export const exercises: Exercise[] = [
     name: "抱背上背拉伸",
     targetMuscles: "菱形肌 / 上背肌群",
     instructions: [
-      "坐直，一侧手臂从对侧腋下穿过，去抱后背。",
-      "另一只手自然辅助固定，感受上背和肩胛周围被拉开。",
-      "保持均匀呼吸，结束后换边。"
+      "坐直或站直，双臂在胸前交叉，双手分别抱住对侧肩胛骨附近。",
+      "双手轻轻向两侧抱住后背，上背自然微微向后拱。",
+      "感受上背和肩胛骨周围被拉开，保持均匀呼吸。"
     ],
     safetyTips: [
-      "不要勉强去抱太深。",
-      "肩痛时减小幅度。",
-      "动作以轻微牵拉感为宜。"
+      "避免耸肩或用力拉扯手臂。",
+      "肩部不适时，减小抱背和拱背幅度。",
+      "以感到上背轻微牵拉为宜。"
     ],
     duration: 30,
     posture: "坐姿/站姿",
@@ -169,12 +176,12 @@ export const exercises: Exercise[] = [
     instructions: [
       "将左臂横过胸前，右手扶住左上臂。",
       "轻轻把左臂带向身体右侧，感受左肩后侧被拉开。",
-      "保持呼吸，结束后换边。"
+      "保持均匀呼吸，停留在舒适的位置。"
     ],
     safetyTips: [
-      "不要耸肩或硬压肩关节。",
-      "肩部疼痛时请减小力度。",
-      "动作以轻微牵拉感为宜。"
+      "避免耸肩或用力将手臂压向身体。",
+      "肩部疼痛时，减小手臂横拉幅度。",
+      "以肩后侧出现轻微牵拉感为宜。"
     ],
     duration: 30,
     posture: "坐姿/站姿",
@@ -192,12 +199,12 @@ export const exercises: Exercise[] = [
     instructions: [
       "将右臂横过胸前，左手扶住右上臂。",
       "轻轻把右臂带向身体左侧，感受右肩后侧被拉开。",
-      "保持呼吸，结束后换边。"
+      "保持均匀呼吸，停留在舒适的位置。"
     ],
     safetyTips: [
-      "不要耸肩或硬压肩关节。",
-      "肩部疼痛时请减小力度。",
-      "动作以轻微牵拉感为宜。"
+      "避免耸肩或用力将手臂压向身体。",
+      "肩部疼痛时，减小手臂横拉幅度。",
+      "以肩后侧出现轻微牵拉感为宜。"
     ],
     duration: 30,
     posture: "坐姿/站姿",
@@ -218,9 +225,9 @@ export const exercises: Exercise[] = [
       "吸气，感受胸口和上背展开。"
     ],
     safetyTips: [
-      "不要用手拉脖子。",
-      "重点是打开胸背，不是仰头。",
-      "动作以轻微牵拉感为宜。"
+      "避免用手向前拉动头部。",
+      "手肘在舒适范围内打开，颈部保持自然。",
+      "以胸口和上背轻微展开为宜。"
     ],
     duration: 30,
     posture: "坐姿/站姿",
@@ -238,12 +245,12 @@ export const exercises: Exercise[] = [
     instructions: [
       "双手手指交扣，向上伸直。",
       "向上延展脊柱和躯干，感受肩背和腰背被拉长。",
-      "保持呼吸，放松肩膀，不要耸肩。"
+      "保持均匀呼吸，肩膀自然放松。"
     ],
     safetyTips: [
-      "腰背不适时减少拉伸幅度。",
-      "不要耸肩或憋气。",
-      "动作以轻微牵拉感为宜。"
+      "腰背不适时，减小上举和延展幅度。",
+      "避免耸肩或憋气。",
+      "以肩背和躯干出现轻微延展感为宜。"
     ],
     duration: 30,
     posture: "坐姿/站姿",
@@ -261,12 +268,12 @@ export const exercises: Exercise[] = [
     instructions: [
       "双手自然向上举起，手臂向天花板方向延伸。",
       "向上延展脊柱和躯干，感受肩背和腰背被拉长。",
-      "保持均匀呼吸。"
+      "保持均匀呼吸，肩膀自然放松。"
     ],
     safetyTips: [
-      "腰背不适时减少拉伸幅度。",
-      "不要耸肩，不要憋气。",
-      "动作以轻微牵拉感为宜。"
+      "腰背不适时，减小上举和延展幅度。",
+      "避免耸肩或憋气。",
+      "以肩背和躯干出现轻微延展感为宜。"
     ],
     duration: 30,
     posture: "坐姿/站姿",
@@ -287,9 +294,9 @@ export const exercises: Exercise[] = [
       "保持均匀呼吸。"
     ],
     safetyTips: [
-      "不要强行拉手臂。",
-      "重点是打开胸口和前胸，不是把腰往前顶。",
-      "肩痛时减小幅度。"
+      "避免强行向后拉动手臂。",
+      "打开胸口时，避免通过向前顶腰来增加幅度。",
+      "肩部疼痛时，减小手臂后伸幅度。"
     ],
     duration: 30,
     posture: "坐姿/站姿",
@@ -310,9 +317,9 @@ export const exercises: Exercise[] = [
       "感受左侧腰背被拉开，保持自然呼吸。"
     ],
     safetyTips: [
-      "先向上延展，再轻轻侧弯。",
-      "不要塌腰，保持自然呼吸。",
-      "只做到舒服的位置。"
+      "先向上延展，再缓慢进入侧弯。",
+      "侧弯幅度以身体舒适为准。",
+      "出现腰背疼痛或头晕时，及时停止动作。"
     ],
     duration: 30,
     posture: "坐姿/站姿",
@@ -333,9 +340,9 @@ export const exercises: Exercise[] = [
       "感受右侧腰背被拉开，保持自然呼吸。"
     ],
     safetyTips: [
-      "先向上延展，再轻轻侧弯。",
-      "不要塌腰，保持自然呼吸。",
-      "只做到舒服的位置。"
+      "先向上延展，再缓慢进入侧弯。",
+      "侧弯幅度以身体舒适为准。",
+      "出现腰背疼痛或头晕时，及时停止动作。"
     ],
     duration: 30,
     posture: "坐姿/站姿",
@@ -357,8 +364,8 @@ export const exercises: Exercise[] = [
     ],
     safetyTips: [
       "先向上伸长，再小幅度转身和侧弯。",
-      "只做到舒服的位置。",
-      "保持自然呼吸。"
+      "转身和侧弯幅度以身体舒适为准。",
+      "出现腰背疼痛或头晕时，及时停止动作。"
     ],
     duration: 30,
     posture: "坐姿/站姿",
@@ -380,8 +387,8 @@ export const exercises: Exercise[] = [
     ],
     safetyTips: [
       "先向上伸长，再小幅度转身和侧弯。",
-      "只做到舒服的位置。",
-      "保持自然呼吸。"
+      "转身和侧弯幅度以身体舒适为准。",
+      "出现腰背疼痛或头晕时，及时停止动作。"
     ],
     duration: 30,
     posture: "坐姿/站姿",
@@ -399,12 +406,12 @@ export const exercises: Exercise[] = [
     instructions: [
       "坐在椅子前侧，双脚踩稳。",
       "低头含胸，双手抱住小腿或放在膝前，让上背和腰背慢慢弯曲放松。",
-      "保持 15–30 秒，均匀呼吸。"
+      "保持均匀呼吸，让上背和腰背自然放松。"
     ],
     safetyTips: [
-      "不要猛压身体。",
-      "如果腰痛明显、腿麻或头晕，立即停止。",
-      "动作以轻微牵拉感为宜。"
+      "避免借力猛压身体或突然加深弯曲幅度。",
+      "出现明显腰痛、腿麻或头晕时，及时停止动作。",
+      "以腰背出现轻微牵拉感为宜。"
     ],
     duration: 30,
     posture: "坐姿/站姿",
@@ -415,3 +422,87 @@ export const exercises: Exercise[] = [
     coverImage: "/exercise-covers/坐式上身弯曲.png"
   }
 ];
+
+export const pairedExerciseGroups: ExerciseGroup[] = [
+  {
+    id: "neck_side_tilt",
+    name: "颈部侧屈拉伸",
+    exerciseIds: ["neck_side_tilt_left", "neck_side_tilt_right"],
+    primaryExerciseId: "neck_side_tilt_left"
+  },
+  {
+    id: "neck_front_back_release",
+    name: "颈部前后放松",
+    exerciseIds: ["neck_forward_release", "neck_backward_release"],
+    primaryExerciseId: "neck_forward_release"
+  },
+  {
+    id: "shoulder_posterior_stretch",
+    name: "肩后侧拉伸",
+    exerciseIds: ["shoulder_posterior_stretch_left", "shoulder_posterior_stretch_right"],
+    primaryExerciseId: "shoulder_posterior_stretch_left"
+  },
+  {
+    id: "lower_back_overhead_side_bend",
+    name: "双手交扣上举侧弯",
+    exerciseIds: ["lower_back_overhead_side_bend_left", "lower_back_overhead_side_bend_right"],
+    primaryExerciseId: "lower_back_overhead_side_bend_left"
+  },
+  {
+    id: "lower_back_rotation_side_bend",
+    name: "上举旋转侧弯",
+    exerciseIds: ["lower_back_rotation_side_bend_left", "lower_back_rotation_side_bend_right"],
+    primaryExerciseId: "lower_back_rotation_side_bend_left"
+  }
+];
+
+const pairedGroupByExerciseId = new Map(
+  pairedExerciseGroups.flatMap((group) => group.exerciseIds.map((exerciseId) => [exerciseId, group] as const))
+);
+const exerciseById = new Map(exercises.map((exercise) => [exercise.id, exercise]));
+
+export function groupIdForExercise(exerciseId: string) {
+  return pairedGroupByExerciseId.get(exerciseId)?.id ?? exerciseId;
+}
+
+export function exerciseGroupById(groupId: string) {
+  return libraryExerciseGroups().find((group) => group.id === groupId);
+}
+
+export function exerciseGroupExercises(group: ExerciseGroup) {
+  return group.exerciseIds
+    .map((exerciseId) => exerciseById.get(exerciseId))
+    .filter((exercise): exercise is Exercise => Boolean(exercise));
+}
+
+export function primaryExerciseForGroup(group: ExerciseGroup) {
+  return exerciseById.get(group.primaryExerciseId) ?? exerciseGroupExercises(group)[0] ?? exercises[0];
+}
+
+export function libraryExerciseGroups(): ExerciseGroup[] {
+  const seenExerciseIds = new Set<string>();
+  const groups: ExerciseGroup[] = [];
+
+  for (const exercise of exercises) {
+    if (seenExerciseIds.has(exercise.id)) continue;
+    const pairedGroup = pairedGroupByExerciseId.get(exercise.id);
+    if (pairedGroup) {
+      groups.push(pairedGroup);
+      pairedGroup.exerciseIds.forEach((exerciseId) => seenExerciseIds.add(exerciseId));
+      continue;
+    }
+    groups.push({
+      id: exercise.id,
+      name: exercise.name,
+      exerciseIds: [exercise.id],
+      primaryExerciseId: exercise.id
+    });
+    seenExerciseIds.add(exercise.id);
+  }
+
+  return groups;
+}
+
+export function groupMatchesCategory(group: ExerciseGroup, category: ExerciseCategory) {
+  return exerciseGroupExercises(group).some((exercise) => exercise.category === category);
+}

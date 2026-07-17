@@ -17,6 +17,13 @@ export type Preferences = {
   updatedAt: string;
 };
 
+export type LikedExerciseGroups = Record<string, string>;
+
+export type RecommendationHistory = {
+  lastSessionFirstExerciseId?: string;
+  lastSessionExerciseIds?: string[];
+};
+
 export type CompletedSession = {
   id: string;
   source: CompletedSessionSource;
@@ -61,6 +68,7 @@ export type AppView =
   | { name: "home" }
   | { name: "temporary" }
   | { name: "edit-preferences"; returnTo: "home" | "profile" }
+  | { name: "library-detail"; groupId: string }
   | { name: "player"; session: SessionPlan }
   | {
       name: "completion";
