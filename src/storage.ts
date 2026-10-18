@@ -3,9 +3,12 @@ import type {
   CompletedSession,
   LikedExerciseGroups,
   Preferences,
-  RecommendationHistory
+  RecommendationHistory,
+  ReminderSettings,
+  SavedMovementGroup
 } from "./types";
 import { exerciseCategories, type ExerciseCategory } from "./data/exercises";
+import { isValidCompletedSession } from "./utils";
 
 const PREFERENCES_KEY = "microMovement.preferences";
 const SESSIONS_KEY = "microMovement.sessions";
@@ -13,6 +16,8 @@ const ABANDONED_SESSIONS_KEY = "microMovement.abandonedSessions";
 const LEARNED_EXERCISE_IDS_KEY = "learnedExerciseIds";
 const LIKED_EXERCISE_GROUPS_KEY = "likedExerciseGroupIds";
 const RECOMMENDATION_HISTORY_KEY = "microMovement.recommendationHistory";
+const REMINDER_SETTINGS_KEY = "microMovement.reminderSettings";
+const SAVED_MOVEMENT_GROUPS_KEY = "microMovement.savedMovementGroups";
 const MIN_SESSION_DURATION_SEC = 30;
 const MAX_SESSION_DURATION_SEC = 180;
 
@@ -55,10 +60,14 @@ export function savePreferences(preferences: Preferences) {
 }
 
 export function loadSessions(): CompletedSession[] {
-  return readJson<(CompletedSession & { source?: unknown })[]>(SESSIONS_KEY, []).map((session) => ({
+  const storedSessions = readJson<(CompletedSession & { source?: unknown })[]>(SESSIONS_KEY, []);
+  const normalizedSessions: CompletedSession[] = storedSessions.map((session): CompletedSession => ({
     ...session,
     source: session.source === "exercise_library" ? "exercise_library" : "home_recommendation"
   }));
+  const validSessions = normalizedSessions.filter(isValidCompletedSession);
+  if (validSessions.length !== storedSessions.length) saveSessions(validSessions);
+  return validSessions;
 }
 
 export function saveSessions(sessions: CompletedSession[]) {
@@ -128,4 +137,60 @@ export function loadRecommendationHistory(): RecommendationHistory {
 
 export function saveRecommendationHistory(history: RecommendationHistory) {
   window.localStorage.setItem(RECOMMENDATION_HISTORY_KEY, JSON.stringify(history));
+}
+
+export function loadReminderSettings(): ReminderSettings {
+  const candidate = readJson<Partial<ReminderSettings>>(REMINDER_SETTINGS_KEY, {});
+  return {
+    enabled: candidate.enabled === true,
+    times: Array.isArray(candidate.times)
+      ? candidate.times.filter((time): time is string => typeof time === "string")
+      : ["11:00", "16:00"]
+  };
+}
+
+export function saveReminderSettings(settings: ReminderSettings) {
+  window.localStorage.setItem(REMINDER_SETTINGS_KEY, JSON.stringify(settings));
+}
+
+export function loadSavedMovementGroups(): SavedMovementGroup[] {
+  const groups = readJson<unknown>(SAVED_MOVEMENT_GROUPS_KEY, []);
+  if (!Array.isArray(groups)) return [];
+  const validGroups = groups.filter((group): group is SavedMovementGroup => {
+    if (!group || typeof group !== "object") return false;
+    const candidate = group as SavedMovementGroup;
+    return Boolean(
+      typeof candidate.id === "string" &&
+      typeof candidate.name === "string" &&
+      typeof candidate.savedAt === "string" &&
+      Array.isArray(candidate.exerciseIds) &&
+      candidate.exerciseIds.every((id) => typeof id === "string") &&
+      Array.isArray(candidate.durations) &&
+      candidate.durations.every((duration) => typeof duration === "number") &&
+      candidate.exerciseIds.length === candidate.durations.length
+    );
+  });
+  const seenConfigurations = new Set<string>();
+  const uniqueGroups = validGroups.filter((group) => {
+    const signature = JSON.stringify([group.exerciseIds, group.durations]);
+    if (seenConfigurations.has(signature)) return false;
+    seenConfigurations.add(signature);
+    return true;
+  });
+  if (uniqueGroups.length !== validGroups.length) {
+    window.localStorage.setItem(SAVED_MOVEMENT_GROUPS_KEY, JSON.stringify(uniqueGroups));
+  }
+  return uniqueGroups;
+}
+
+export function saveMovementGroup(group: SavedMovementGroup): SavedMovementGroup[] {
+  const next = [group, ...loadSavedMovementGroups().filter((item) => item.id !== group.id)];
+  window.localStorage.setItem(SAVED_MOVEMENT_GROUPS_KEY, JSON.stringify(next));
+  return next;
+}
+
+export function deleteMovementGroup(groupId: string): SavedMovementGroup[] {
+  const next = loadSavedMovementGroups().filter((group) => group.id !== groupId);
+  window.localStorage.setItem(SAVED_MOVEMENT_GROUPS_KEY, JSON.stringify(next));
+  return next;
 }

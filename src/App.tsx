@@ -1,26 +1,34 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   ArrowLeft,
+  Bell,
   Check,
+  ChevronRight,
   ClipboardList,
-  Download,
+  Grid2X2,
   Heart,
   Home,
   Leaf,
   LibraryBig,
+  Minus,
+  Music2,
   Pause,
   Play,
+  Plus,
   RotateCcw,
   ShieldCheck,
   SkipForward,
+  SlidersHorizontal,
   Sparkles,
   UserRound,
+  Vibrate,
   X
 } from "lucide-react";
 import {
   exerciseGroupById,
   exerciseGroupExercises,
   exerciseCategories,
+  exercises,
   groupIdForExercise,
   groupMatchesCategory,
   libraryExerciseGroups,
@@ -33,21 +41,23 @@ import {
 import {
   appendAbandonedSession,
   appendSession,
+  deleteMovementGroup,
   loadAbandonedSessions,
   loadLikedExerciseGroups,
   loadPreferences,
-  loadLearnedExerciseIds,
   loadRecommendationHistory,
+  loadReminderSettings,
+  loadSavedMovementGroups,
   loadSessions,
-  markExerciseLearned,
+  saveMovementGroup,
   saveLikedExerciseGroups,
   saveRecommendationHistory,
+  saveReminderSettings,
   savePreferences
 } from "./storage";
 import {
   createAbandonedSession,
   createCompletedSession,
-  generateReplaySession,
   generateSession,
   generateSingleExerciseSession
 } from "./session";
@@ -58,19 +68,12 @@ import type {
   LikedExerciseGroups,
   MovementMode,
   Preferences,
+  ReminderSettings,
+  SavedMovementGroup,
   Tab,
   TargetArea
 } from "./types";
-import {
-  averageCompletedSec,
-  calculateStreak,
-  completedSessionSource,
-  exportActivityCsv,
-  exportActivityJson,
-  formatDuration,
-  totalCompletedSec,
-  todayTotalSec
-} from "./utils";
+import { calculateStreak, formatDuration, todayTotalSec } from "./utils";
 import { copy } from "./copy";
 
 type PreferenceDraft = Pick<
@@ -102,18 +105,6 @@ const onboardingDraft: OnboardingDraft = {
 };
 
 const durationOptions = [30, 60, 90, 120, 150, 180];
-const firstPracticeHint = "舒服就好，不必一定做满 30 秒。";
-const practiceHintOptions = [
-  "工作间隙轻轻拉伸一下，就已经很好了",
-  "有轻微拉伸感即可，不需要追求更大幅度",
-  "保持自然呼吸，让身体慢慢放松",
-  "今天愿意停下来照顾一下身体，就很不错",
-  "不需要做到标准，舒服、安全更重要",
-  "觉得不舒服时，可以随时暂停或结束",
-  "一次短短的活动，也是在打断久坐",
-  "不求一次拉到位，慢慢来更容易坚持",
-  "现在的这几十秒，也是在给身体回一点电"
-];
 const targetAreaOptions: Array<{ value: TargetArea; label: string; emoji: string }> = [
   { value: "肩颈", label: "肩颈", emoji: "💻" },
   { value: "上背", label: "上背", emoji: "🪽" },
@@ -153,8 +144,12 @@ function fullPreferenceSummary(preferences: Preferences) {
   return preferenceSummary(preferences);
 }
 
-function completedSessionSourceLabel(session: CompletedSession) {
-  return copy.profile.sourceLabels[completedSessionSource(session)];
+function movementGroupConfigurationsMatch(left: SavedMovementGroup, right: SavedMovementGroup) {
+  return left.exerciseIds.length === right.exerciseIds.length &&
+    left.exerciseIds.every(
+      (exerciseId, index) =>
+        exerciseId === right.exerciseIds[index] && left.durations[index] === right.durations[index]
+    );
 }
 
 function recentCompletedExerciseIds(sessions: CompletedSession[], limit = 3) {
@@ -176,14 +171,6 @@ function sortGroupsByLike(groups: ExerciseGroup[], likedExerciseGroups: LikedExe
     .map((item) => item.group);
 }
 
-function randomPracticeHint(previousHint: string) {
-  const candidates =
-    practiceHintOptions.length > 1
-      ? practiceHintOptions.filter((hint) => hint !== previousHint)
-      : practiceHintOptions;
-  return candidates[Math.floor(Math.random() * candidates.length)] ?? firstPracticeHint;
-}
-
 function App() {
   const [preferences, setPreferences] = useState<Preferences | null>(() => loadPreferences());
   const [sessions, setSessions] = useState<CompletedSession[]>(() => loadSessions());
@@ -192,6 +179,9 @@ function App() {
   );
   const [likedExerciseGroups, setLikedExerciseGroups] = useState<LikedExerciseGroups>(() =>
     loadLikedExerciseGroups()
+  );
+  const [savedMovementGroups, setSavedMovementGroups] = useState<SavedMovementGroup[]>(() =>
+    loadSavedMovementGroups()
   );
   const [activeTab, setActiveTab] = useState<Tab>("home");
   const [view, setView] = useState<AppView>(() =>
@@ -276,7 +266,7 @@ function App() {
         };
     const plan = generateSession(modePreferences);
     rememberRecommendation(plan);
-    setView({ name: "player", session: plan });
+    setView({ name: "session-preview", session: plan });
   }
 
   function startTemporary(draft: PreferenceDraft) {
@@ -289,7 +279,35 @@ function App() {
       likedExerciseGroups
     });
     rememberRecommendation(plan);
-    setView({ name: "player", session: { ...plan, source: "temporary" } });
+    setView({ name: "session-preview", session: { ...plan, source: "temporary" } });
+  }
+
+  function openSavedMovementGroup(group: SavedMovementGroup) {
+    if (!preferences) return;
+    const selectedExercises = group.exerciseIds.flatMap((exerciseId, index) => {
+      const exercise = exercises.find((item) => item.id === exerciseId);
+      return exercise ? [{ ...exercise, duration: group.durations[index] ?? exercise.duration }] : [];
+    });
+    if (!selectedExercises.length) return;
+    const targetAreas = Array.from(new Set(selectedExercises.map((exercise) => exercise.category)));
+    const plannedDurationSec = selectedExercises.reduce((total, exercise) => total + exercise.duration, 0);
+    setView({
+      name: "session-preview",
+      savedGroupId: group.id,
+      savedGroupName: group.name,
+      session: {
+        id: `saved-session-${Date.now()}`,
+        source: "preferences",
+        preferences: {
+          ...preferences,
+          durationMin: plannedDurationSec / 60,
+          sessionDurationSec: plannedDurationSec,
+          targetAreas
+        },
+        exercises: selectedExercises,
+        plannedDurationSec
+      }
+    });
   }
 
   function completeSession(
@@ -297,10 +315,21 @@ function App() {
     actualCompletedSec: number,
     completedExerciseIds?: string[]
   ) {
+    const completedIds = completedExerciseIds ?? [];
+    const requiredIds = plan.session.exercises.map((exercise) => exercise.id);
+    const completedEveryExercise =
+      requiredIds.length > 0 &&
+      completedIds.length === requiredIds.length &&
+      requiredIds.every((exerciseId) => completedIds.includes(exerciseId));
+
+    if (!completedEveryExercise || actualCompletedSec <= 0) {
+      setView({ name: "home" });
+      return;
+    }
     if (completedPlanIds.current.has(plan.session.id)) return;
     completedPlanIds.current.add(plan.session.id);
 
-    const completed = createCompletedSession(plan.session, actualCompletedSec, completedExerciseIds);
+    const completed = createCompletedSession(plan.session, actualCompletedSec, completedIds);
     if (plan.session.source === "single") {
       setSessions(appendSession(completed));
       setView({ name: "completion", session: completed, mode: "single" });
@@ -360,6 +389,59 @@ function App() {
             abandonSession(view, actualCompletedSec, currentExerciseIndex)
           }
           onToggleLike={toggleLikedExerciseGroup}
+        />
+      </Shell>
+    );
+  }
+
+  if (view.name === "session-preview") {
+    return (
+      <Shell hideNav>
+        <SessionPreview
+          initialSession={view.session}
+          initialSavedGroupId={view.savedGroupId}
+          initialName={view.savedGroupName}
+          onBack={() => {
+            if (view.savedGroupId) setActiveTab("library");
+            setView({ name: "home" });
+          }}
+          onSave={(group) => {
+            const existing = savedMovementGroups.find((savedGroup) => savedGroup.id === group.id);
+            const duplicate = existing
+              ? (
+                  existing.name === group.name &&
+                  movementGroupConfigurationsMatch(existing, group)
+                ) || savedMovementGroups.some(
+                  (savedGroup) =>
+                    savedGroup.id !== group.id &&
+                    movementGroupConfigurationsMatch(savedGroup, group)
+                )
+              : savedMovementGroups.some((savedGroup) =>
+                  movementGroupConfigurationsMatch(savedGroup, group)
+                );
+            if (duplicate) return "duplicate";
+            setSavedMovementGroups(saveMovementGroup(group));
+            return "saved";
+          }}
+          onDelete={(groupId) => {
+            setSavedMovementGroups(deleteMovementGroup(groupId));
+            setActiveTab("library");
+            setView({ name: "home" });
+          }}
+          onStart={(session) => setView({ name: "player", session })}
+        />
+      </Shell>
+    );
+  }
+
+  if (view.name === "reminder-settings") {
+    return (
+      <Shell hideNav>
+        <ReminderSettingsScreen
+          onBack={() => {
+            setActiveTab("profile");
+            setView({ name: "home" });
+          }}
         />
       </Shell>
     );
@@ -476,8 +558,6 @@ function App() {
       {activeTab === "home" && (
         <HomeScreen
           preferences={preferences}
-          todaySec={todaySec}
-          streak={streak}
           onStart={startFromPreferences}
           onTemporary={() => setView({ name: "temporary" })}
         />
@@ -485,7 +565,9 @@ function App() {
       {activeTab === "library" && (
         <LibraryScreen
           likedExerciseGroups={likedExerciseGroups}
+          savedMovementGroups={savedMovementGroups}
           onOpen={(group) => setView({ name: "library-detail", groupId: group.id })}
+          onOpenSavedGroup={openSavedMovementGroup}
           onToggleLike={toggleLikedExerciseGroup}
         />
       )}
@@ -493,16 +575,10 @@ function App() {
         <ProfileScreen
           preferences={preferences}
           sessions={sessions}
-          abandonedSessions={abandonedSessions}
           todaySec={todaySec}
           streak={streak}
           onEdit={() => setView({ name: "edit-preferences", returnTo: "profile" })}
-          onReplay={(exerciseIds, targetAreas, plannedDurationSec) =>
-            setView({
-              name: "player",
-              session: generateReplaySession(exerciseIds, targetAreas, plannedDurationSec)
-            })
-          }
+          onReminder={() => setView({ name: "reminder-settings" })}
         />
       )}
     </Shell>
@@ -940,14 +1016,10 @@ function OptionButton({
 
 function HomeScreen({
   preferences,
-  todaySec,
-  streak,
   onStart,
   onTemporary
 }: {
   preferences: Preferences;
-  todaySec: number;
-  streak: number;
   onStart: (mode?: MovementMode) => void;
   onTemporary: () => void;
 }) {
@@ -960,13 +1032,8 @@ function HomeScreen({
 
   return (
     <div className="animate-rise space-y-6">
-      <header className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-semibold tracking-normal text-leaf">{copy.app.name}</h1>
-        </div>
-        <div className="rounded-full bg-sun/70 px-3 py-1 text-xs text-ink">
-          {copy.home.todayPrefix} {formatDuration(todaySec)}
-        </div>
+      <header>
+        <h1 className="text-3xl font-semibold tracking-normal text-leaf">{copy.app.name}</h1>
       </header>
 
       <section className="overflow-hidden rounded-[8px] bg-white shadow-soft">
@@ -1008,10 +1075,6 @@ function HomeScreen({
               <span className="mt-auto self-end text-sm font-semibold text-leaf">{copy.home.startAction}</span>
             </button>
           </div>
-          <section className="grid grid-cols-2 gap-3">
-            <Stat label={copy.home.todayTotal} value={formatDuration(todaySec)} quiet />
-            <Stat label={copy.home.streak} value={copy.common.days(streak)} quiet />
-          </section>
           <button className="w-full rounded-full bg-white/85 px-5 py-4 text-base font-semibold text-ink shadow-sm transition duration-150 hover:-translate-y-0.5 active:translate-y-0.5 active:scale-[0.99]" onClick={onTemporary} type="button">
             {copy.home.temporary}
           </button>
@@ -1086,6 +1149,342 @@ function StandingPrompt({
   );
 }
 
+function SessionPreview({
+  initialSession,
+  initialName,
+  initialSavedGroupId,
+  onBack,
+  onSave,
+  onDelete,
+  onStart
+}: {
+  initialSession: Extract<AppView, { name: "player" }>["session"];
+  initialName?: string;
+  initialSavedGroupId?: string;
+  onBack: () => void;
+  onSave: (group: SavedMovementGroup) => "saved" | "duplicate";
+  onDelete: (groupId: string) => void;
+  onStart: (session: Extract<AppView, { name: "player" }>["session"]) => void;
+}) {
+  const [sessionExercises, setSessionExercises] = useState(() =>
+    initialSession.exercises.map((exercise) => ({ ...exercise }))
+  );
+  const defaultName = `${areaLabels(initialSession.preferences.targetAreas).join("、")}轻松一下`;
+  const [groupName, setGroupName] = useState(initialName ?? defaultName);
+  const [savedGroupId, setSavedGroupId] = useState(initialSavedGroupId);
+  const [nameDraft, setNameDraft] = useState(initialName ?? defaultName);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [saveDialogOpen, setSaveDialogOpen] = useState(false);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const totalDuration = sessionExercises.reduce((total, exercise) => total + exercise.duration, 0);
+
+  useEffect(() => {
+    if (!toastMessage) return;
+    const timer = window.setTimeout(() => setToastMessage(null), 2400);
+    return () => window.clearTimeout(timer);
+  }, [toastMessage]);
+
+  function updateDuration(exerciseId: string, delta: number) {
+    setSessionExercises((current) =>
+      current.map((exercise) =>
+        exercise.id === exerciseId
+          ? { ...exercise, duration: Math.min(120, Math.max(5, exercise.duration + delta)) }
+          : exercise
+      )
+    );
+    setSaved(false);
+  }
+
+  function adjustTotal(delta: number) {
+    setSessionExercises((current) => {
+      const next = current.map((exercise) => ({ ...exercise }));
+      let remaining = Math.abs(delta);
+      let cursor = 0;
+      while (remaining > 0 && next.length) {
+        const target = next[cursor % next.length];
+        const candidate = target.duration + Math.sign(delta) * 5;
+        if (candidate >= 5 && candidate <= 120) {
+          target.duration = candidate;
+          remaining -= 5;
+        }
+        cursor += 1;
+        if (cursor > next.length * 30) break;
+      }
+      return next;
+    });
+    setSaved(false);
+  }
+
+  function buildSession() {
+    return {
+      ...initialSession,
+      preferences: {
+        ...initialSession.preferences,
+        durationMin: totalDuration / 60,
+        sessionDurationSec: totalDuration
+      },
+      exercises: sessionExercises,
+      plannedDurationSec: totalDuration
+    };
+  }
+
+  function saveCurrentGroup() {
+    const nextName = nameDraft.trim();
+    if (!nextName) return;
+    const nextId = savedGroupId ?? `saved-${Date.now()}`;
+    const result = onSave({
+      id: nextId,
+      name: nextName,
+      exerciseIds: sessionExercises.map((exercise) => exercise.id),
+      durations: sessionExercises.map((exercise) => exercise.duration),
+      savedAt: new Date().toISOString()
+    });
+    if (result === "duplicate") {
+      setSaveDialogOpen(false);
+      setToastMessage("这个动作组已经保存过了");
+      return;
+    }
+    setSavedGroupId(nextId);
+    setGroupName(nextName);
+    setSaveDialogOpen(false);
+    setSaved(true);
+  }
+
+  if (pickerOpen) {
+    return (
+      <ExercisePicker
+        initialExercises={sessionExercises}
+        onCancel={() => setPickerOpen(false)}
+        onDone={(nextExercises) => {
+          setSessionExercises(nextExercises);
+          setSaved(false);
+          setPickerOpen(false);
+        }}
+      />
+    );
+  }
+
+  return (
+    <div className="animate-rise space-y-5 pb-28">
+      {toastMessage && (
+        <div
+          aria-live="polite"
+          className="fixed left-1/2 top-5 z-50 -translate-x-1/2 rounded-full bg-ink px-5 py-3 text-sm font-semibold text-white shadow-[0_12px_35px_rgba(47,50,45,0.28)]"
+          role="status"
+        >
+          {toastMessage}
+        </div>
+      )}
+      <header className="grid grid-cols-[44px_1fr_44px] items-center">
+        <button
+          aria-label={copy.common.back}
+          className="grid h-11 w-11 place-items-center rounded-full border border-black/10 bg-white/80 shadow-sm"
+          onClick={onBack}
+          type="button"
+        >
+          <X size={20} />
+        </button>
+        <p className="text-center text-base font-semibold">{copy.preview.title}</p>
+      </header>
+
+      <section className="rounded-[22px] bg-white/85 p-5 shadow-soft">
+        <h1 className="text-3xl font-semibold leading-tight">{groupName}</h1>
+        <p className="mt-2 text-sm text-muted">
+          {copy.common.durationSec(totalDuration)} · {copy.common.movementItems(sessionExercises.length)}
+        </p>
+        <p className="mt-2 text-sm leading-6 text-muted">
+          根据你这次的选择，优先照顾{areaLabels(initialSession.preferences.targetAreas).join("、")}。
+        </p>
+      </section>
+
+      <section className="rounded-[20px] bg-white/85 p-4 shadow-soft">
+        <div className="flex items-center justify-between">
+          <span className="font-semibold">{copy.preview.totalDuration}</span>
+          <strong className="text-lg text-leaf">{copy.common.durationSec(totalDuration)}</strong>
+        </div>
+        <div className="mt-4 grid grid-cols-[44px_1fr_44px] items-center gap-3">
+          <button aria-label="减少总时长" className="grid h-11 w-11 place-items-center rounded-full bg-paper" onClick={() => adjustTotal(-15)} type="button">
+            <Minus size={18} />
+          </button>
+          <div className="h-2 overflow-hidden rounded-full bg-moss/60">
+            <div className="h-full rounded-full bg-leaf" style={{ width: `${Math.min(100, Math.max(8, (totalDuration / 180) * 100))}%` }} />
+          </div>
+          <button aria-label="增加总时长" className="grid h-11 w-11 place-items-center rounded-full bg-moss text-leaf" onClick={() => adjustTotal(15)} type="button">
+            <Plus size={18} />
+          </button>
+        </div>
+      </section>
+
+      <section className="space-y-3 rounded-[20px] bg-white/85 p-4 shadow-soft">
+        <div className="flex items-center justify-between">
+          <h2 className="text-lg font-semibold">动作总览</h2>
+          <button className="inline-flex items-center gap-1 text-sm font-semibold text-leaf" onClick={() => setPickerOpen(true)} type="button">
+            <SlidersHorizontal size={16} />
+            {copy.preview.editMovements}
+          </button>
+        </div>
+        {sessionExercises.map((exercise) => (
+          <article className="grid grid-cols-[56px_1fr_auto] items-center gap-3" key={exercise.id}>
+            <img alt="" className="h-14 w-14 rounded-full object-cover" src={exercise.coverImage} />
+            <div className="min-w-0">
+              <p className="truncate text-sm font-semibold">{exercise.name}</p>
+              <p className="mt-1 text-xs text-muted">{exercise.category} · {exercise.posture}</p>
+            </div>
+            <div className="flex items-center gap-1">
+              <button aria-label={`减少${exercise.name}时长`} className="grid h-8 w-8 place-items-center rounded-full bg-paper" onClick={() => updateDuration(exercise.id, -5)} type="button"><Minus size={14} /></button>
+              <span className="min-w-12 text-center text-xs font-semibold tabular-nums">{exercise.duration}s</span>
+              <button aria-label={`增加${exercise.name}时长`} className="grid h-8 w-8 place-items-center rounded-full bg-moss" onClick={() => updateDuration(exercise.id, 5)} type="button"><Plus size={14} /></button>
+            </div>
+          </article>
+        ))}
+      </section>
+
+      <div className="grid gap-3">
+        <button className="w-full rounded-full bg-moss px-5 py-4 font-semibold text-leaf" onClick={() => { setNameDraft(groupName); setSaveDialogOpen(true); }} type="button">
+          {initialSavedGroupId
+            ? saved ? copy.preview.changesSaved : copy.preview.saveChanges
+            : saved ? copy.preview.saved : copy.preview.save}
+        </button>
+        {initialSavedGroupId && (
+          <button className="w-full rounded-full border border-coral/45 bg-white/75 px-5 py-4 font-semibold text-[#a85f51]" onClick={() => setDeleteDialogOpen(true)} type="button">
+            {copy.preview.deleteGroup}
+          </button>
+        )}
+      </div>
+
+      {saveDialogOpen && (
+        <div className="fixed inset-0 z-40 grid place-items-center bg-ink/25 px-5 backdrop-blur-sm">
+          <section aria-modal="true" className="w-full max-w-sm rounded-[24px] bg-white p-5 shadow-[0_24px_80px_rgba(47,50,45,0.24)]" role="dialog">
+            <div className="flex items-center justify-between gap-4">
+              <div><p className="text-xs font-semibold text-leaf">我的动作组</p><h2 className="mt-1 text-2xl font-semibold">{initialSavedGroupId ? "修改动作组名称" : "给动作组起个名字"}</h2></div>
+              <button aria-label="关闭" className="grid h-10 w-10 place-items-center rounded-full bg-paper" onClick={() => setSaveDialogOpen(false)} type="button"><X size={18} /></button>
+            </div>
+            <label className="mt-5 block text-sm font-semibold text-muted" htmlFor="movement-group-name">动作组名称</label>
+            <input autoFocus className="mt-2 w-full rounded-[14px] border border-leaf/25 bg-paper px-4 py-3 text-base font-semibold outline-none focus:border-leaf" id="movement-group-name" maxLength={24} onChange={(event) => setNameDraft(event.target.value)} value={nameDraft} />
+            <p className="mt-2 text-right text-xs text-muted">{nameDraft.trim().length}/24</p>
+            <button className="mt-4 w-full rounded-full bg-leaf px-5 py-4 font-semibold text-white disabled:opacity-40" disabled={!nameDraft.trim()} onClick={saveCurrentGroup} type="button">{initialSavedGroupId ? copy.preview.saveChanges : "确认保存"}</button>
+          </section>
+        </div>
+      )}
+
+      {deleteDialogOpen && initialSavedGroupId && (
+        <div className="fixed inset-0 z-40 grid place-items-center bg-ink/25 px-5 backdrop-blur-sm">
+          <section aria-modal="true" className="w-full max-w-sm rounded-[24px] bg-white p-5 shadow-[0_24px_80px_rgba(47,50,45,0.24)]" role="alertdialog">
+            <h2 className="text-2xl font-semibold">确认删除这个动作组？</h2>
+            <p className="mt-3 text-sm leading-6 text-muted">删除后无法恢复，未保存的临时调整也会一并放弃。</p>
+            <div className="mt-5 grid grid-cols-2 gap-3">
+              <button className="rounded-full bg-paper px-4 py-3 font-semibold text-ink" onClick={() => setDeleteDialogOpen(false)} type="button">取消</button>
+              <button className="rounded-full bg-[#a85f51] px-4 py-3 font-semibold text-white" onClick={() => onDelete(initialSavedGroupId)} type="button">确认删除</button>
+            </div>
+          </section>
+        </div>
+      )}
+
+      <div className="fixed inset-x-0 bottom-0 z-20 border-t border-black/5 bg-paper/95 px-5 py-4 backdrop-blur">
+        <button className="mx-auto block min-h-14 w-full max-w-md rounded-full bg-leaf px-5 py-4 text-base font-semibold text-white shadow-soft disabled:opacity-40" disabled={!sessionExercises.length} onClick={() => onStart(buildSession())} type="button">
+          <Play className="mr-2 inline" size={17} fill="currentColor" />
+          {copy.preview.start}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function ExercisePicker({
+  initialExercises,
+  onCancel,
+  onDone
+}: {
+  initialExercises: Exercise[];
+  onCancel: () => void;
+  onDone: (exercises: Exercise[]) => void;
+}) {
+  const [selectedExercises, setSelectedExercises] = useState(() =>
+    initialExercises.map((exercise) => ({ ...exercise }))
+  );
+  const [filter, setFilter] = useState<TargetArea | typeof copy.library.all>(copy.library.all);
+  const [detailGroupId, setDetailGroupId] = useState<string | null>(null);
+  const filteredGroups = useMemo(
+    () => filter === copy.library.all
+      ? libraryExerciseGroups()
+      : libraryExerciseGroups().filter((group) => groupMatchesCategory(group, filter)),
+    [filter]
+  );
+
+  function groupIsSelected(group: ExerciseGroup) {
+    return group.exerciseIds.every((exerciseId) =>
+      selectedExercises.some((exercise) => exercise.id === exerciseId)
+    );
+  }
+
+  function toggleGroup(group: ExerciseGroup) {
+    const groupIds = new Set(group.exerciseIds);
+    if (groupIsSelected(group)) {
+      if (selectedExercises.length <= group.exerciseIds.length) return;
+      setSelectedExercises((current) => current.filter((exercise) => !groupIds.has(exercise.id)));
+      return;
+    }
+    const existingIds = new Set(selectedExercises.map((exercise) => exercise.id));
+    const additions = exerciseGroupExercises(group)
+      .filter((exercise) => !existingIds.has(exercise.id))
+      .map((exercise) => ({ ...exercise }));
+    setSelectedExercises((current) => [...current, ...additions]);
+  }
+
+  if (detailGroupId) {
+    const detailGroup = exerciseGroupById(detailGroupId);
+    if (detailGroup) {
+      return (
+        <LibraryDetail
+          group={detailGroup}
+          selectionMode
+          selected={groupIsSelected(detailGroup)}
+          onBack={() => setDetailGroupId(null)}
+          onSelectionToggle={() => toggleGroup(detailGroup)}
+        />
+      );
+    }
+  }
+
+  return (
+    <div className="animate-rise space-y-5 pb-28">
+      <header className="grid grid-cols-[44px_1fr_64px] items-center gap-2">
+        <button aria-label="取消修改" className="grid h-11 w-11 place-items-center rounded-full border border-black/10 bg-white/80 shadow-sm" onClick={onCancel} type="button"><ArrowLeft size={19} /></button>
+        <div className="text-center"><p className="text-xs font-semibold text-leaf">修改动作组</p><h1 className="text-lg font-semibold">从动作库选择动作</h1></div>
+        <span className="text-right text-sm font-semibold text-leaf">{selectedExercises.length} 个</span>
+      </header>
+
+      <div className="flex gap-2 overflow-x-auto pb-1">
+        {([copy.library.all, ...exerciseCategories] as const).map((item) => (
+          <button className={cn("shrink-0 rounded-full px-4 py-2 text-sm transition", filter === item ? "bg-leaf text-white" : "bg-white/75 text-muted")} key={item} onClick={() => setFilter(item)} type="button">{item}</button>
+        ))}
+      </div>
+
+      <section className="space-y-3">
+        {filteredGroups.map((group) => {
+          const exercise = primaryExerciseForGroup(group);
+          const selected = groupIsSelected(group);
+          return (
+            <article className={cn("relative overflow-hidden rounded-[12px] border bg-white/85 shadow-soft", selected ? "border-leaf/60" : "border-transparent")} key={group.id}>
+              <button className="grid w-full grid-cols-[112px_1fr] gap-3 p-3 pr-16 text-left" onClick={() => setDetailGroupId(group.id)} type="button">
+                <ExerciseImage exercise={exercise} />
+                <div className="min-w-0"><h2 className="font-semibold">{group.name}</h2><p className="mt-1 line-clamp-2 text-xs leading-5 text-muted">{exercise.category} · {exercise.targetMuscles}</p><p className="mt-2 text-xs text-ink/70">{copy.common.durationSec(exercise.duration)} · {exercise.posture} · {exercise.space} · {exercise.intensity}</p></div>
+              </button>
+              <button aria-label={selected ? `移出${group.name}` : `加入${group.name}`} className={cn("absolute right-3 top-1/2 grid h-11 w-11 -translate-y-1/2 place-items-center rounded-full shadow-sm", selected ? "bg-leaf text-white" : "bg-moss text-leaf")} onClick={() => toggleGroup(group)} type="button">{selected ? <Check size={19} /> : <Plus size={19} />}</button>
+            </article>
+          );
+        })}
+      </section>
+
+      <div className="fixed inset-x-0 bottom-0 z-20 border-t border-black/5 bg-paper/95 px-5 py-4 backdrop-blur">
+        <button className="mx-auto block min-h-14 w-full max-w-md rounded-full bg-leaf px-5 py-4 font-semibold text-white shadow-soft" onClick={() => onDone(selectedExercises)} type="button">完成修改（{selectedExercises.length} 个动作）</button>
+      </div>
+    </div>
+  );
+}
+
 function Stat({ label, value, quiet = false }: { label: string; value: string; quiet?: boolean }) {
   return (
     <div className={cn("rounded-[8px] p-4", quiet ? "border border-black/5 bg-paper/70" : "bg-white/75 shadow-soft")}>
@@ -1109,45 +1508,23 @@ function ExercisePlayer({
   onToggleLike: (groupId: string) => void;
 }) {
   const [index, setIndex] = useState(0);
-  const learnedExerciseIds = useRef(new Set(loadLearnedExerciseIds()));
   const initialExercise = session.session.exercises[0];
-  const [phase, setPhase] = useState<"learning" | "transition" | "exercise">(() =>
-    session.session.source === "single" || learnedExerciseIds.current.has(initialExercise?.id)
-      ? "exercise"
-      : "learning"
-  );
-  const [learningRemainingSec, setLearningRemainingSec] = useState(10);
+  const [phase, setPhase] = useState<"preparation" | "transition" | "exercise">("preparation");
+  const [preparationRemainingSec, setPreparationRemainingSec] = useState(5);
   const [transitionRemainingSec, setTransitionRemainingSec] = useState(3);
-  const [remainingSec, setRemainingSec] = useState(() => initialExercise?.duration ?? 30);
+  const [remainingSec, setRemainingSec] = useState(() => initialExercise?.duration ?? 15);
   const [running, setRunning] = useState(true);
-  const [practiceHint, setPracticeHint] = useState(firstPracticeHint);
-  const [practiceHintVisible, setPracticeHintVisible] = useState(true);
   const [actualCompletedSec, setActualCompletedSec] = useState(0);
   const [finished, setFinished] = useState(false);
   const [tipsOpen, setTipsOpen] = useState(false);
   const wasRunningBeforeTips = useRef(true);
   const completedExerciseIds = useRef<string[]>([]);
-  const hintMainTimer = useRef<number | undefined>(undefined);
-  const hintFadeTimer = useRef<number | undefined>(undefined);
-  const hintStartedAt = useRef(0);
-  const hintRemainingMs = useRef(6000);
-  const lastPracticeHint = useRef(firstPracticeHint);
-  const runningRef = useRef(running);
-  const phaseRef = useRef(phase);
-  const finishedRef = useRef(finished);
   const current = session.session.exercises[index];
   const total = session.session.exercises.length;
   const exerciseDurationSec = current.duration;
   const currentGroupId = groupIdForExercise(current.id);
   const currentLiked = Boolean(likedExerciseGroups[currentGroupId]);
   const usesLibrarySideTransition = session.session.source === "single" && total > 1;
-  const exitLabel = session.session.source === "single" ? copy.library.backToLibrary : copy.common.backHome;
-
-  useEffect(() => {
-    runningRef.current = running;
-    phaseRef.current = phase;
-    finishedRef.current = finished;
-  }, [finished, phase, running]);
 
   function recordCompletedExercise(exerciseId: string) {
     if (completedExerciseIds.current.includes(exerciseId)) return completedExerciseIds.current;
@@ -1155,84 +1532,12 @@ function ExercisePlayer({
     return completedExerciseIds.current;
   }
 
-  function clearPracticeHintTimers() {
-    if (hintMainTimer.current) {
-      window.clearTimeout(hintMainTimer.current);
-      hintMainTimer.current = undefined;
-    }
-    if (hintFadeTimer.current) {
-      window.clearTimeout(hintFadeTimer.current);
-      hintFadeTimer.current = undefined;
-    }
-  }
-
-  function resetPracticeHint() {
-    clearPracticeHintTimers();
-    hintRemainingMs.current = 6000;
-    lastPracticeHint.current = firstPracticeHint;
-    setPracticeHint(firstPracticeHint);
-    setPracticeHintVisible(true);
-  }
-
-  function pausePracticeHintTimer() {
-    if (hintMainTimer.current) {
-      window.clearTimeout(hintMainTimer.current);
-      hintMainTimer.current = undefined;
-      hintRemainingMs.current = Math.max(0, hintRemainingMs.current - (Date.now() - hintStartedAt.current));
-    }
-    if (hintFadeTimer.current) {
-      window.clearTimeout(hintFadeTimer.current);
-      hintFadeTimer.current = undefined;
-      setPracticeHintVisible(true);
-    }
-  }
-
-  function startPracticeHintTimer() {
-    clearPracticeHintTimers();
-    hintStartedAt.current = Date.now();
-    hintMainTimer.current = window.setTimeout(() => {
-      hintMainTimer.current = undefined;
-      setPracticeHintVisible(false);
-      hintFadeTimer.current = window.setTimeout(() => {
-        hintFadeTimer.current = undefined;
-        const nextHint = randomPracticeHint(lastPracticeHint.current);
-        lastPracticeHint.current = nextHint;
-        hintRemainingMs.current = 5000;
-        setPracticeHint(nextHint);
-        setPracticeHintVisible(true);
-        if (runningRef.current && phaseRef.current === "exercise" && !finishedRef.current) {
-          startPracticeHintTimer();
-        }
-      }, 260);
-    }, hintRemainingMs.current);
-  }
-
-  useEffect(() => {
-    resetPracticeHint();
-    return clearPracticeHintTimers;
-  }, [current.id]);
-
-  useEffect(() => {
-    if (phase !== "exercise" || finished) {
-      pausePracticeHintTimer();
-      return undefined;
-    }
-    if (!running) {
-      pausePracticeHintTimer();
-      return undefined;
-    }
-    startPracticeHintTimer();
-    return pausePracticeHintTimer;
-  }, [current.id, finished, phase, running]);
-
   useEffect(() => {
     if (!running || finished) return undefined;
     const timer = window.setInterval(() => {
-      if (phase === "learning") {
-        setLearningRemainingSec((currentRemaining) => {
+      if (phase === "preparation") {
+        setPreparationRemainingSec((currentRemaining) => {
           if (currentRemaining > 1) return currentRemaining - 1;
-          learnedExerciseIds.current.add(current.id);
-          markExerciseLearned(current.id);
           setPhase("exercise");
           setRemainingSec(current.duration);
           return 0;
@@ -1283,9 +1588,6 @@ function ExercisePlayer({
   }, [current.id, current.duration, finished, index, onComplete, phase, running, total, usesLibrarySideTransition]);
 
   function startExercise() {
-    learnedExerciseIds.current.add(current.id);
-    markExerciseLearned(current.id);
-    resetPracticeHint();
     setPhase("exercise");
     setRemainingSec(current.duration);
     setRunning(true);
@@ -1297,13 +1599,8 @@ function ExercisePlayer({
     setIndex(nextIndex);
     setTipsOpen(false);
     setRunning(true);
-    if (session.session.source === "single" || learnedExerciseIds.current.has(nextExercise.id)) {
-      setPhase("exercise");
-      setRemainingSec(nextExercise.duration);
-    } else {
-      setPhase("learning");
-      setLearningRemainingSec(10);
-    }
+    setPhase("exercise");
+    setRemainingSec(nextExercise.duration);
   }
 
   function exitToHome() {
@@ -1340,16 +1637,8 @@ function ExercisePlayer({
   }
 
   function restart() {
-    resetPracticeHint();
     setRemainingSec(exerciseDurationSec);
     setRunning(true);
-    if (phase === "exercise" && running && !finished) {
-      window.setTimeout(() => {
-        if (runningRef.current && phaseRef.current === "exercise" && !finishedRef.current) {
-          startPracticeHintTimer();
-        }
-      }, 0);
-    }
   }
 
   function openTips() {
@@ -1365,52 +1654,49 @@ function ExercisePlayer({
 
   const progressPercent = ((exerciseDurationSec - remainingSec) / exerciseDurationSec) * 100;
 
-  if (phase === "learning") {
+  if (phase === "preparation") {
     return (
       <div className="flex min-h-[calc(100svh-24px)] animate-rise flex-col gap-4 pb-[calc(env(safe-area-inset-bottom)+0.5rem)]">
-        <header className="flex items-center justify-between">
+        <header className="grid grid-cols-[44px_1fr_90px] items-center gap-2">
           <button
-            className="inline-flex min-h-10 items-center gap-1.5 rounded-full px-1 text-sm font-semibold text-ink"
+            aria-label={copy.common.back}
+            className="grid h-11 w-11 place-items-center rounded-full border border-black/10 bg-white/80 shadow-sm"
             onClick={exitToHome}
             type="button"
           >
             <ArrowLeft size={18} />
-            {exitLabel}
           </button>
-          <div className="flex items-center gap-2">
-            <LikeButton
-              liked={currentLiked}
-              label={currentLiked ? copy.common.unlike : copy.common.like}
-              onClick={() => onToggleLike(currentGroupId)}
-            />
-            <span className="rounded-full bg-moss px-3 py-1 text-xs font-semibold text-leaf">
-              {copy.player.progress(index + 1, total)}
-            </span>
-          </div>
+          <span className="text-center text-sm font-semibold text-leaf">{copy.player.progress(index + 1, total)}</span>
+          <button className="rounded-full border border-black/5 bg-white/80 px-3 py-2 text-xs font-semibold shadow-sm" onClick={openTips} type="button">{copy.player.tips}</button>
         </header>
 
         <section className="text-center">
-          <h1 className="text-3xl font-semibold tracking-normal">{copy.player.learningTitle}</h1>
-          <p className="mx-auto mt-2 max-w-sm text-sm leading-6 text-muted">{copy.player.learningPhilosophy}</p>
-          <p className="mt-3 text-5xl font-semibold tabular-nums text-leaf" aria-label={`${learningRemainingSec} ${copy.common.seconds}`}>
-            {learningRemainingSec}
-          </p>
+          <p className="text-sm font-semibold text-leaf">准备一下，马上开始</p>
+          <h1 className="mt-2 text-3xl font-semibold tracking-normal">{current.name}</h1>
         </section>
 
-        <ExerciseImage exercise={current} large />
-
-        <div className="grid gap-3">
-          <DetailPanel icon={<ClipboardList size={15} />} title={copy.player.instructionTitle} items={current.instructions} />
-          <DetailPanel icon={<ShieldCheck size={15} />} title={copy.player.safetyTitle} items={current.safetyTips} safety />
+        <ExerciseImage exercise={current} immersive />
+        <div className="text-center">
+          <p className="text-7xl font-bold leading-none tabular-nums text-leaf" aria-label={`${preparationRemainingSec} ${copy.common.seconds}`}>{preparationRemainingSec}</p>
+          <p className="mt-2 text-sm text-muted">{copy.common.seconds}</p>
         </div>
+        <div className="h-2 overflow-hidden rounded-full bg-white"><div className="h-full rounded-full bg-leaf transition-all" style={{ width: `${((5 - preparationRemainingSec) / 5) * 100}%` }} /></div>
 
         <button
           className="mt-auto min-h-14 w-full rounded-full bg-leaf px-5 py-4 text-base font-semibold text-white shadow-soft transition active:scale-[0.99]"
           onClick={startExercise}
           type="button"
         >
-          {copy.player.learnedAction}
+          立即开始
         </button>
+        {tipsOpen && (
+          <div className="fixed inset-0 z-30 grid place-items-center bg-ink/20 px-5 py-8 backdrop-blur-sm">
+            <section aria-modal="true" className="max-h-[80svh] w-full max-w-md overflow-y-auto rounded-[22px] border border-white/60 bg-white/90 p-5 shadow-[0_24px_80px_rgba(47,50,45,0.22)]" role="dialog">
+              <div className="flex items-center justify-between gap-4"><h2 className="text-xl font-semibold">{copy.player.tips}</h2><button aria-label={copy.player.closeTips} className="grid h-10 w-10 place-items-center rounded-full bg-paper text-muted" onClick={closeTips} type="button"><X size={18} /></button></div>
+              <div className="mt-4 grid gap-3"><DetailPanel icon={<ClipboardList size={15} />} title={copy.player.instructionTitle} items={current.instructions} /><DetailPanel icon={<ShieldCheck size={15} />} title={copy.player.safetyTitle} items={current.safetyTips} safety /></div>
+            </section>
+          </div>
+        )}
       </div>
     );
   }
@@ -1442,54 +1728,35 @@ function ExercisePlayer({
 
   return (
     <div className="relative flex min-h-[calc(100svh-24px)] animate-rise flex-col gap-2 pb-[calc(env(safe-area-inset-bottom)+0.35rem)]">
-      <header className="flex items-center justify-between pb-0.5">
+      <header className="grid grid-cols-[44px_1fr_90px] items-center gap-2 pb-1">
         <button
-          className="inline-flex min-h-9 items-center justify-center gap-1.5 rounded-full px-1 py-1 text-sm font-semibold text-ink"
+          aria-label={copy.common.back}
+          className="grid h-11 w-11 place-items-center rounded-full border border-black/10 bg-white/80 shadow-sm"
           onClick={exitToHome}
           type="button"
         >
           <ArrowLeft size={18} />
-          {exitLabel}
         </button>
-        <div className="flex items-center gap-2">
-          <LikeButton
-            liked={currentLiked}
-            label={currentLiked ? copy.common.unlike : copy.common.like}
-            onClick={() => onToggleLike(currentGroupId)}
-          />
-          <span className="rounded-full bg-moss px-3 py-1 text-xs font-semibold text-leaf">
-            {copy.player.progress(index + 1, total)}
-          </span>
-        </div>
+        <span className="text-center text-sm font-semibold text-leaf">{copy.player.progress(index + 1, total)}</span>
+        <button className="rounded-full border border-black/5 bg-white/80 px-3 py-2 text-xs font-semibold shadow-sm" onClick={openTips} type="button">{copy.player.tips}</button>
       </header>
 
-      <p
-        className={cn(
-          "mx-auto min-h-6 max-w-full overflow-hidden text-ellipsis whitespace-nowrap px-1 text-center text-[clamp(14px,3.75vw,16px)] font-medium leading-6 text-leaf/75 transition-opacity duration-300",
-          practiceHintVisible ? "opacity-100" : "opacity-0"
-        )}
-      >
-        {practiceHint}
-      </p>
+      <h1 className="px-2 py-2 text-center text-[28px] font-bold leading-tight tracking-normal">{current.name}</h1>
 
       <section className="flex flex-1 flex-col justify-start gap-3 py-0">
-        <ExerciseImage exercise={current} immersive />
+        <div className="relative">
+          <ExerciseImage exercise={current} immersive />
+          <LikeButton className="absolute right-3 top-3" liked={currentLiked} label={currentLiked ? copy.common.unlike : copy.common.like} onClick={() => onToggleLike(currentGroupId)} />
+        </div>
         <div className="text-center">
-          <p className="text-6xl font-semibold leading-none tabular-nums text-leaf">{remainingSec}</p>
+          <p className="text-7xl font-bold leading-none tabular-nums text-leaf">{remainingSec}</p>
           <p className="mt-1 text-xs text-muted">{copy.common.seconds}</p>
         </div>
-        <div className="h-1.5 overflow-hidden rounded-full bg-white">
+        <div className="relative mt-1 h-2 rounded-full bg-white">
           <div className="h-full rounded-full bg-leaf transition-all duration-500" style={{ width: `${progressPercent}%` }} />
+          <span aria-hidden="true" className="absolute top-1/2 -translate-x-1/2 -translate-y-1/2 text-base transition-all duration-500" style={{ left: `${Math.min(98, Math.max(2, progressPercent))}%` }}>🔋</span>
         </div>
       </section>
-
-      <button
-        className="absolute bottom-[4.25rem] right-0 z-10 rounded-full border border-white/70 bg-white/70 px-4 py-2 text-xs font-semibold text-ink/75 shadow-sm backdrop-blur-md transition hover:bg-white/90"
-        onClick={openTips}
-        type="button"
-      >
-        {copy.player.tips}
-      </button>
 
       <div className="grid grid-cols-4 gap-2 rounded-[8px] bg-paper/85 pt-1 backdrop-blur">
         <IconButton
@@ -1553,7 +1820,7 @@ function DetailPanel({
         <h2 className="text-sm font-semibold">{title}</h2>
       </div>
       <ul className="mt-2 list-disc space-y-1 pl-5 text-sm leading-5 text-ink/80">
-        {items.map((item) => <li key={item}>{item}</li>)}
+        {(safety ? items.slice(0, 2) : items).map((item) => <li key={item}>{item}</li>)}
       </ul>
     </section>
   );
@@ -1624,11 +1891,11 @@ function DetailHeroImage({ exercise }: { exercise: Exercise }) {
   }, [exercise.id, exercise.coverImage]);
 
   return (
-    <div className="relative h-[clamp(208px,25svh,224px)] w-full overflow-hidden rounded-[18px] bg-white shadow-soft">
+    <div className="relative h-[clamp(240px,30svh,280px)] w-full overflow-hidden rounded-[22px] bg-white shadow-soft">
       {!failed ? (
         <img
           alt={exercise.name}
-          className="h-full w-full object-contain"
+          className="h-full w-full object-cover object-center"
           onError={() => setFailed(true)}
           src={exercise.coverImage}
         />
@@ -1715,15 +1982,22 @@ function Completion({
 
 function LibraryScreen({
   likedExerciseGroups,
+  savedMovementGroups,
   onOpen,
+  onOpenSavedGroup,
   onToggleLike
 }: {
   likedExerciseGroups: LikedExerciseGroups;
+  savedMovementGroups: SavedMovementGroup[];
   onOpen: (group: ExerciseGroup) => void;
+  onOpenSavedGroup: (group: SavedMovementGroup) => void;
   onToggleLike: (groupId: string) => void;
 }) {
-  const [filter, setFilter] = useState<TargetArea | typeof copy.library.all>(copy.library.all);
+  const [filter, setFilter] = useState<
+    TargetArea | typeof copy.library.all | typeof copy.library.myGroups
+  >(copy.library.all);
   const filtered = useMemo(() => {
+    if (filter === copy.library.myGroups) return [];
     const groups = filter === copy.library.all
       ? libraryExerciseGroups()
       : libraryExerciseGroups().filter((group) => groupMatchesCategory(group, filter));
@@ -1738,7 +2012,7 @@ function LibraryScreen({
       </header>
 
       <div className="flex gap-2 overflow-x-auto pb-1">
-        {([copy.library.all, ...exerciseCategories] as const).map((item) => (
+        {([copy.library.all, ...exerciseCategories, copy.library.myGroups] as const).map((item) => (
           <button
             className={cn(
               "shrink-0 rounded-full px-4 py-2 text-sm transition",
@@ -1753,8 +2027,28 @@ function LibraryScreen({
         ))}
       </div>
 
-      <section className="space-y-3">
-        {filtered.map((group) => {
+      {filter === copy.library.myGroups ? (
+        <section className="space-y-3">
+          {savedMovementGroups.length === 0 ? (
+            <div className="rounded-[18px] bg-white/75 p-6 text-center shadow-soft"><LibraryBig className="mx-auto text-leaf" size={30} /><h2 className="mt-3 font-semibold">还没有保存的动作组</h2><p className="mt-2 text-sm leading-6 text-muted">从首页生成动作组，在预览页调整后保存，就会出现在这里。</p></div>
+          ) : savedMovementGroups.map((group) => {
+            const groupExercises = group.exerciseIds.flatMap((exerciseId) => {
+              const exercise = exercises.find((item) => item.id === exerciseId);
+              return exercise ? [exercise] : [];
+            });
+            const totalDuration = group.durations.reduce((total, duration) => total + duration, 0);
+            return (
+              <button className="w-full rounded-[16px] bg-white/85 p-4 text-left shadow-soft transition hover:-translate-y-0.5" key={group.id} onClick={() => onOpenSavedGroup(group)} type="button">
+                <div className="flex items-start justify-between gap-3"><div><h2 className="text-lg font-semibold">{group.name}</h2><p className="mt-1 text-xs text-muted">{copy.common.durationSec(totalDuration)} · {copy.common.movementItems(group.exerciseIds.length)}</p></div><ChevronRight className="mt-1 shrink-0 text-leaf" size={20} /></div>
+                <div className="mt-3 flex -space-x-2">{groupExercises.slice(0, 5).map((exercise) => <img alt="" className="h-10 w-10 rounded-full border-2 border-white object-cover" key={exercise.id} src={exercise.coverImage} />)}</div>
+                <p className="mt-3 line-clamp-2 text-sm leading-6 text-ink/75">{groupExercises.map((exercise) => exercise.name).join(" · ")}</p>
+              </button>
+            );
+          })}
+        </section>
+      ) : (
+        <section className="space-y-3">
+          {filtered.map((group) => {
           const exercise = primaryExerciseForGroup(group);
           const isLiked = Boolean(likedExerciseGroups[group.id]);
           return (
@@ -1782,9 +2076,10 @@ function LibraryScreen({
               onClick={() => onToggleLike(group.id)}
             />
           </article>
-        );
-        })}
-      </section>
+          );
+          })}
+        </section>
+      )}
     </div>
   );
 }
@@ -1794,20 +2089,25 @@ function LibraryDetail({
   likedAt,
   onBack,
   onStart,
-  onToggleLike
+  onToggleLike,
+  selectionMode = false,
+  selected = false,
+  onSelectionToggle
 }: {
   group: ExerciseGroup;
   likedAt?: string;
   onBack: () => void;
-  onStart: (exercisesForSession: Exercise[]) => void;
-  onToggleLike: () => void;
+  onStart?: (exercisesForSession: Exercise[]) => void;
+  onToggleLike?: () => void;
+  selectionMode?: boolean;
+  selected?: boolean;
+  onSelectionToggle?: () => void;
 }) {
   const primaryExercise = primaryExerciseForGroup(group);
   const sessionExercises = exerciseGroupExercises(group);
-  const isPaired = sessionExercises.length > 1;
 
   return (
-    <div className="flex min-h-[calc(100svh-24px)] animate-rise flex-col gap-2.5 pb-[calc(env(safe-area-inset-bottom)+0.3rem)]">
+    <div className="flex min-h-[calc(100svh-24px)] animate-rise flex-col gap-5 pb-[calc(env(safe-area-inset-bottom)+0.3rem)]">
       <header className="flex items-center justify-between pb-0.5">
         <button
           className="inline-flex min-h-10 items-center gap-1.5 rounded-full px-1 text-lg font-semibold text-ink"
@@ -1817,22 +2117,26 @@ function LibraryDetail({
           <ArrowLeft size={22} strokeWidth={2.4} />
           {copy.common.back}
         </button>
-        <LikeButton
-          className="h-10 w-10 bg-transparent shadow-none"
-          liked={Boolean(likedAt)}
-          label={likedAt ? copy.common.unlike : copy.common.like}
-          onClick={onToggleLike}
-        />
+        {selectionMode ? (
+          <span className="rounded-full bg-moss px-3 py-1.5 text-xs font-semibold text-leaf">仅查看动作介绍</span>
+        ) : onToggleLike ? (
+          <LikeButton
+            className="h-10 w-10 bg-transparent shadow-none"
+            liked={Boolean(likedAt)}
+            label={likedAt ? copy.common.unlike : copy.common.like}
+            onClick={onToggleLike}
+          />
+        ) : null}
       </header>
 
       <DetailHeroImage exercise={primaryExercise} />
 
-      <section className="space-y-2.5 px-1">
-        <div className="space-y-1.5">
+      <section className="space-y-3 px-1 py-1">
+        <div className="space-y-2.5">
           <h1 className="text-[29px] font-semibold leading-[1.1] tracking-normal text-ink">
             {group.name}
           </h1>
-          <p className="flex flex-wrap items-center gap-x-2.5 gap-y-0.5 text-base leading-[1.4] text-muted">
+          <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm leading-6 text-muted">
             <Leaf className="text-leaf" size={20} />
             <span>{primaryExercise.category}</span>
             <span aria-hidden="true">·</span>
@@ -1840,29 +2144,21 @@ function LibraryDetail({
             <span aria-hidden="true">·</span>
             <span>{primaryExercise.posture}</span>
             <span aria-hidden="true">·</span>
-            <span>{copy.common.durationSec(primaryExercise.duration)}</span>
-            <span aria-hidden="true">·</span>
             <span>{primaryExercise.space}</span>
             <span aria-hidden="true">·</span>
             <span>{primaryExercise.intensity}</span>
           </p>
         </div>
-        {isPaired && (
-          <p className="flex items-center gap-2 rounded-[8px] bg-moss/70 px-3.5 py-2 text-base font-semibold leading-[1.35] text-leaf">
-            <Leaf className="shrink-0" size={19} />
-            {copy.library.pairedPracticeNotice}
-          </p>
-        )}
       </section>
 
-      <section className="border-t border-black/5 px-1 pt-3">
+      <section className="border-t border-black/5 px-1 pt-5">
         <div className="flex items-center gap-2.5">
           <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-leaf text-white">
             <ClipboardList size={17} />
           </span>
           <h2 className="text-xl font-semibold tracking-normal">{copy.library.instructionTitle}</h2>
         </div>
-        <ol className="mt-2 space-y-1.5">
+        <ol className="mt-4 space-y-3">
           {primaryExercise.instructions.map((item, index) => (
             <li className="grid grid-cols-[29px_1fr] items-start gap-3 text-base leading-[1.42] text-ink/85" key={item}>
               <span className="grid h-7 w-7 place-items-center rounded-full bg-leaf text-sm font-semibold text-white">
@@ -1874,27 +2170,83 @@ function LibraryDetail({
         </ol>
       </section>
 
-      <section className="rounded-[8px] bg-coral/15 px-4 py-2.5">
+      <section className="rounded-[18px] bg-coral/15 px-4 py-4">
         <div className="flex items-center gap-2.5">
           <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-coral text-white">
             <ShieldCheck size={17} />
           </span>
           <h2 className="text-xl font-semibold tracking-normal text-[#a85f51]">{copy.player.safetyTitle}</h2>
         </div>
-        <ul className="mt-1.5 list-disc space-y-0.5 pl-6 text-base leading-[1.42] text-ink/80">
-          {primaryExercise.safetyTips.map((item) => (
+        <ul className="mt-3 list-disc space-y-1.5 pl-6 text-base leading-7 text-ink/80">
+          {primaryExercise.safetyTips.slice(0, 2).map((item) => (
             <li key={item}>{item}</li>
           ))}
         </ul>
       </section>
 
-      <button
-        className="min-h-13 w-full rounded-full bg-leaf px-5 py-3 text-lg font-semibold text-white shadow-soft transition active:scale-[0.99]"
-        onClick={() => onStart(sessionExercises)}
-        type="button"
-      >
-        {copy.library.startNow}
-      </button>
+      {selectionMode && onSelectionToggle ? (
+        <button className={cn("min-h-13 w-full rounded-full px-5 py-3 text-lg font-semibold shadow-soft transition active:scale-[0.99]", selected ? "bg-moss text-leaf" : "bg-leaf text-white")} onClick={onSelectionToggle} type="button">
+          {selected ? "从动作组移除" : "加入动作组"}
+        </button>
+      ) : onStart ? (
+        <button className="min-h-13 w-full rounded-full bg-leaf px-5 py-3 text-lg font-semibold text-white shadow-soft transition active:scale-[0.99]" onClick={() => onStart(sessionExercises)} type="button">{copy.library.startNow}</button>
+      ) : null}
+    </div>
+  );
+}
+
+function ReminderSettingsScreen({ onBack }: { onBack: () => void }) {
+  const [settings, setSettings] = useState<ReminderSettings>(() => loadReminderSettings());
+  const [saved, setSaved] = useState(false);
+
+  function updateTime(index: number, value: string) {
+    setSettings((current) => ({
+      ...current,
+      times: current.times.map((time, timeIndex) => (timeIndex === index ? value : time))
+    }));
+    setSaved(false);
+  }
+
+  function persist() {
+    const normalized = { ...settings, times: Array.from(new Set(settings.times.filter(Boolean))).sort() };
+    saveReminderSettings(normalized);
+    setSettings(normalized);
+    setSaved(true);
+  }
+
+  return (
+    <div className="animate-rise space-y-6 pb-8">
+      <header className="grid grid-cols-[44px_1fr_44px] items-center">
+        <button aria-label={copy.common.back} className="grid h-11 w-11 place-items-center rounded-full border border-black/10 bg-white/80 shadow-sm" onClick={onBack} type="button"><ArrowLeft size={19} /></button>
+        <h1 className="text-center text-lg font-semibold">{copy.reminder.title}</h1>
+      </header>
+
+      <section className="overflow-hidden rounded-[24px] bg-white/85 shadow-soft">
+        <div className="flex items-center justify-between gap-4 p-5">
+          <div className="flex items-center gap-4">
+            <span className="grid h-14 w-14 place-items-center rounded-full bg-moss text-leaf"><Bell size={26} /></span>
+            <div><h2 className="text-xl font-semibold">{copy.reminder.title}</h2><p className="mt-1 text-sm text-muted">{copy.reminder.subtitle}</p></div>
+          </div>
+          <button aria-label="提醒开关" className={cn("relative h-8 w-14 shrink-0 rounded-full transition", settings.enabled ? "bg-leaf" : "bg-muted/30")} onClick={() => { setSettings((current) => ({ ...current, enabled: !current.enabled })); setSaved(false); }} type="button"><span className={cn("absolute top-1 h-6 w-6 rounded-full bg-white shadow-sm transition", settings.enabled ? "left-7" : "left-1")} /></button>
+        </div>
+
+        <div className={cn("border-t border-black/5 p-5 transition", !settings.enabled && "opacity-45")}>
+          <p className="font-semibold text-muted">{copy.reminder.times}</p>
+          <div className="mt-4 flex flex-wrap gap-2">
+            {settings.times.map((time, index) => (
+              <label className="flex items-center gap-2 rounded-[14px] bg-paper px-3 py-2" key={`${index}-${time}`}>
+                <input aria-label={`提醒时间 ${index + 1}`} className="bg-transparent font-semibold text-leaf outline-none" disabled={!settings.enabled} onChange={(event) => updateTime(index, event.target.value)} type="time" value={time} />
+                <button aria-label={`删除 ${time}`} className="grid h-6 w-6 place-items-center rounded-full bg-muted/15" disabled={!settings.enabled} onClick={() => { setSettings((current) => ({ ...current, times: current.times.filter((_, itemIndex) => itemIndex !== index) })); setSaved(false); }} type="button"><X size={13} /></button>
+              </label>
+            ))}
+            <button className="inline-flex items-center gap-1 rounded-[14px] border border-dashed border-leaf/40 px-4 py-3 text-sm font-semibold text-leaf disabled:opacity-40" disabled={!settings.enabled || settings.times.length >= 5} onClick={() => { setSettings((current) => ({ ...current, times: [...current.times, "18:00"] })); setSaved(false); }} type="button"><Plus size={16} />{copy.reminder.addTime}</button>
+          </div>
+        </div>
+      </section>
+
+      <p className="rounded-[16px] bg-moss/55 px-4 py-3 text-sm leading-6 text-muted">有点没电了吗？动一下再继续。一次 30 秒也很好。</p>
+      <p className="text-xs leading-5 text-muted">{copy.reminder.gentleNote}</p>
+      <button className="w-full rounded-full bg-leaf px-5 py-4 font-semibold text-white shadow-soft" onClick={persist} type="button">{saved ? "已保存" : copy.reminder.save}</button>
     </div>
   );
 }
@@ -1902,144 +2254,115 @@ function LibraryDetail({
 function ProfileScreen({
   preferences,
   sessions,
-  abandonedSessions,
   todaySec,
   streak,
   onEdit,
-  onReplay
+  onReminder
 }: {
   preferences: Preferences;
   sessions: CompletedSession[];
-  abandonedSessions: AbandonedSession[];
   todaySec: number;
   streak: number;
   onEdit: () => void;
-  onReplay: (exerciseIds: string[], targetAreas: string[], plannedDurationSec: number) => void;
+  onReminder: () => void;
 }) {
-  const sortedSessions = useMemo(
-    () => [...sessions].sort((a, b) => b.completedAt.localeCompare(a.completedAt)),
-    [sessions]
-  );
-  const sortedAbandonedSessions = useMemo(
-    () => [...abandonedSessions].sort((a, b) => b.abandonedAt.localeCompare(a.abandonedAt)),
-    [abandonedSessions]
-  );
+  const [widgetOpen, setWidgetOpen] = useState(false);
+  const [musicOn, setMusicOn] = useState(true);
+  const [vibrationOn, setVibrationOn] = useState(true);
+  const completedDates = useMemo(() => new Set(sessions.map((session) => session.date)), [sessions]);
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = now.getMonth();
+  const monthLabel = `${year}年${month + 1}月`;
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const leadingEmptyDays = (new Date(year, month, 1).getDay() + 6) % 7;
+  const calendarCells = Array.from({ length: leadingEmptyDays + daysInMonth }, (_, index) => {
+    const day = index - leadingEmptyDays + 1;
+    if (day < 1) return null;
+    const date = `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+    return { day, completed: completedDates.has(date) };
+  });
   return (
     <div className="animate-rise space-y-5">
-      <header className="space-y-2">
-        <p className="text-sm font-medium text-leaf">{copy.profile.eyebrow}</p>
-        <h1 className="text-3xl font-semibold tracking-normal">{copy.profile.title}</h1>
+      <header className="flex flex-col items-center pb-2 pt-2 text-center">
+        <div className="grid h-24 w-24 place-items-center rounded-[32px] bg-gradient-to-br from-moss to-[#a8b99c] text-leaf shadow-soft">
+          <Leaf size={42} />
+        </div>
+        <h1 className="mt-3 text-3xl font-semibold">hi</h1>
+        <p className="text-sm text-muted">MicroMove 用户</p>
       </header>
 
-      <section className="space-y-4 rounded-[8px] bg-white/80 p-4 shadow-soft">
+      <section className="rounded-[22px] bg-white/85 p-5 shadow-soft">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <p className="text-base font-semibold text-muted">{copy.profile.cumulativeDays}</p>
+            <p className="mt-2 text-4xl font-bold">{completedDates.size}<span className="ml-1 text-xl">天</span></p>
+            <p className="mt-4 text-sm text-muted">{completedDates.size ? "每一次短短的活动都算数" : "你还没有开始呢"}</p>
+          </div>
+          <div className="w-[190px]">
+            <p className="mb-2 text-right text-xs font-semibold text-muted">{monthLabel}</p>
+            <div className="grid grid-cols-7 gap-1">
+              {calendarCells.map((cell, index) => (
+                <span aria-label={cell ? `${cell.day}日${cell.completed ? "已完成" : ""}` : undefined} className={cn("grid aspect-square place-items-center rounded-[5px] text-[9px]", cell?.completed ? "bg-leaf font-semibold text-white" : cell ? "bg-moss/55 text-muted" : "bg-transparent")} key={index}>{cell?.day}</span>
+              ))}
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section className="space-y-4 rounded-[22px] bg-white/85 p-4 shadow-soft">
         <div>
-          <p className="text-xs text-muted">{copy.profile.currentPreferences}</p>
-          <p className="mt-2 text-sm font-semibold leading-6">{fullPreferenceSummary(preferences)}</p>
+          <p className="text-base font-semibold text-muted">{copy.profile.preferencesAndRecords}</p>
+          <p className="mt-2 text-xs text-muted">{copy.profile.currentPreferences}</p>
+          <p className="mt-1 text-sm font-semibold leading-6">{fullPreferenceSummary(preferences)}</p>
         </div>
         <div className="grid grid-cols-2 gap-3">
           <Stat label={copy.profile.todayTotal} value={formatDuration(todaySec)} />
           <Stat label={copy.profile.streak} value={copy.common.days(streak)} />
-          <Stat label={copy.profile.totalCompleted} value={formatDuration(totalCompletedSec(sessions))} />
-          <Stat label={copy.profile.averageSession} value={formatDuration(averageCompletedSec(sessions))} />
-          <Stat label={copy.profile.completedSessions} value={copy.common.groups(sessions.length)} />
-          <Stat label={copy.profile.abandonedSessions} value={copy.common.records(abandonedSessions.length)} />
         </div>
-        <p className="rounded-[8px] bg-moss/70 px-4 py-3 text-sm leading-6 text-ink/75">
-          {copy.profile.exportNotice}
-        </p>
-        <div className="grid grid-cols-2 gap-3">
-          <button className="rounded-full bg-moss px-4 py-3 text-sm font-semibold text-ink" onClick={onEdit} type="button">
-            {copy.profile.editPreferences}
-          </button>
-          <button className="inline-flex items-center justify-center gap-2 rounded-full bg-leaf px-4 py-3 text-sm font-semibold text-white" onClick={() => exportActivityCsv(sortedSessions, sortedAbandonedSessions)} type="button">
-            <Download size={16} />
-            {copy.profile.exportCsv}
-          </button>
-          <button className="col-span-2 inline-flex items-center justify-center gap-2 rounded-full bg-lavender px-4 py-3 text-sm font-semibold text-ink" onClick={() => exportActivityJson(sortedSessions, sortedAbandonedSessions)} type="button">
-            <Download size={16} />
-            {copy.profile.exportJson}
-          </button>
-        </div>
+        <button className="inline-flex w-full items-center justify-center gap-2 rounded-full bg-leaf px-4 py-4 text-sm font-semibold text-white" onClick={onEdit} type="button">
+          <SlidersHorizontal size={17} />{copy.profile.editPreferences}
+        </button>
       </section>
 
-      <section className="space-y-3">
-        <h2 className="text-lg font-semibold">{copy.profile.historyTitle}</h2>
-        {sortedSessions.length === 0 ? (
-          <p className="rounded-[8px] bg-white/70 p-4 text-sm leading-6 text-muted">
-            {copy.profile.emptyHistory}
-          </p>
-        ) : (
-          sortedSessions.map((session) => (
-            <article className="rounded-[8px] bg-white/75 p-4 shadow-soft" key={session.id}>
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <p className="font-semibold">{session.date}</p>
-                  <p className="mt-1 text-sm text-muted">
-                    {copy.common.targetPriority(areaLabels(session.targetAreas))}
-                  </p>
-                </div>
-                <div className="flex shrink-0 flex-col items-end gap-2">
-                  <span className="rounded-full bg-moss px-3 py-1 text-xs text-leaf">{copy.profile.completedBadge}</span>
-                  <span className="text-xs text-muted">
-                    {copy.common.source}：{completedSessionSourceLabel(session)}
-                  </span>
-                </div>
-              </div>
-              <div className="mt-3 flex gap-4 text-sm text-ink/75">
-                <span>{formatDuration(session.actualCompletedSec)}</span>
-                <span>{copy.common.movementItems(session.movementCount)}</span>
-              </div>
-              <button
-                className="mt-4 w-full rounded-full bg-moss px-4 py-3 text-sm font-semibold text-ink"
-                onClick={() =>
-                  onReplay(session.exerciseIds, session.targetAreas, session.plannedDurationSec)
-                }
-                type="button"
-              >
-                {copy.profile.replayCompleted}
-              </button>
-            </article>
-          ))
-        )}
+      <section className="rounded-[22px] bg-white/85 p-4 shadow-soft">
+        <p className="mb-2 text-base font-semibold text-muted">{copy.profile.settings}</p>
+        <button className="flex w-full items-center justify-between border-b border-black/5 py-4 text-left font-semibold" onClick={onReminder} type="button">
+          <span className="inline-flex items-center gap-3"><Bell size={21} />{copy.profile.reminder}</span><ChevronRight size={19} />
+        </button>
+        <button className="flex w-full items-center justify-between py-4 text-left font-semibold" onClick={() => setWidgetOpen(true)} type="button">
+          <span className="inline-flex items-center gap-3"><Grid2X2 size={21} />{copy.profile.addWidget}</span><ChevronRight size={19} />
+        </button>
       </section>
 
-      <section className="space-y-3">
-        <h2 className="text-lg font-semibold">{copy.profile.abandonedTitle}</h2>
-        {sortedAbandonedSessions.length === 0 ? (
-          <p className="rounded-[8px] bg-white/70 p-4 text-sm leading-6 text-muted">
-            {copy.profile.emptyAbandoned}
-          </p>
-        ) : (
-          sortedAbandonedSessions.slice(0, 10).map((session) => (
-            <article className="rounded-[8px] bg-white/75 p-4 shadow-soft" key={session.id}>
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <p className="font-semibold">{session.date}</p>
-                  <p className="mt-1 text-sm text-muted">
-                    {copy.common.targetPriority(areaLabels(session.targetAreas))}
-                  </p>
-                </div>
-                <span className="rounded-full bg-coral/20 px-3 py-1 text-xs text-ink/70">{copy.profile.abandonedBadge}</span>
-              </div>
-              <div className="mt-3 flex flex-wrap gap-x-4 gap-y-2 text-sm text-ink/75">
-                <span>{copy.profile.donePrefix} {formatDuration(session.actualCompletedSec)}</span>
-                <span>{copy.common.movementProgress(session.completedMovementCount, session.movementCount)}</span>
-                <span>{copy.profile.stoppedAt(session.currentExerciseIndex + 1)}</span>
-              </div>
-              <button
-                className="mt-4 w-full rounded-full bg-moss px-4 py-3 text-sm font-semibold text-ink"
-                onClick={() =>
-                  onReplay(session.exerciseIds, session.targetAreas, session.plannedDurationSec)
-                }
-                type="button"
-              >
-                {copy.profile.replayPlan}
-              </button>
-            </article>
-          ))
-        )}
+      <section className="rounded-[22px] bg-white/85 p-4 shadow-soft">
+        <p className="mb-2 text-base font-semibold text-muted">{copy.profile.soundAndVibration}</p>
+        <VisualToggle icon={<Music2 size={21} />} label={copy.profile.music} active={musicOn} onClick={() => setMusicOn((current) => !current)} />
+        <VisualToggle icon={<Vibrate size={21} />} label={copy.profile.vibration} active={vibrationOn} onClick={() => setVibrationOn((current) => !current)} />
+        <p className="mt-3 text-xs leading-5 text-muted">当前仅展示设置样式，不播放声音或触发振动。</p>
       </section>
+
+      {widgetOpen && (
+        <div className="fixed inset-0 z-30 grid place-items-center bg-ink/25 px-5 backdrop-blur-sm">
+          <section className="w-full max-w-sm rounded-[24px] bg-white p-5 text-center shadow-[0_24px_80px_rgba(47,50,45,0.24)]">
+            <div className="mx-auto grid h-16 w-16 place-items-center rounded-[20px] bg-moss text-leaf"><Grid2X2 size={30} /></div>
+            <h2 className="mt-4 text-xl font-semibold">{copy.profile.addWidget}</h2>
+            <p className="mt-2 text-sm leading-6 text-muted">{copy.profile.widgetMessage}</p>
+            <p className="mt-3 rounded-[12px] bg-paper px-3 py-3 text-xs leading-5 text-muted">这是 Web MVP 引导原型；原生 App 将在这里进入系统小组件添加流程。</p>
+            <button className="mt-5 w-full rounded-full bg-leaf px-4 py-3 font-semibold text-white" onClick={() => setWidgetOpen(false)} type="button">知道了</button>
+          </section>
+        </div>
+      )}
     </div>
+  );
+}
+
+function VisualToggle({ icon, label, active, onClick }: { icon: ReactNode; label: string; active: boolean; onClick: () => void }) {
+  return (
+    <button className="flex w-full items-center justify-between border-b border-black/5 py-3 last:border-0" onClick={onClick} type="button">
+      <span className="inline-flex items-center gap-3 font-semibold">{icon}{label}</span>
+      <span className={cn("relative h-7 w-12 rounded-full transition", active ? "bg-leaf" : "bg-muted/25")}><span className={cn("absolute top-1 h-5 w-5 rounded-full bg-white shadow-sm transition", active ? "left-6" : "left-1")} /></span>
+    </button>
   );
 }
 

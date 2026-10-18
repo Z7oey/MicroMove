@@ -136,7 +136,8 @@ export const copy = {
     eyebrow: "动作库",
     title: "适合办公间隙的小动作",
     all: "全部",
-    duration: "30秒",
+    myGroups: "我的动作组",
+    duration: "15秒",
     instructionTitle: "动作步骤",
     tryExercise: "试做这个动作",
     startNow: "立即跟练",
@@ -144,33 +145,38 @@ export const copy = {
     pairedPracticeNotice: "跟练时将依次完成两侧或两个方向。"
   },
   profile: {
-    eyebrow: "我的",
-    title: "偏好和记录",
     currentPreferences: "当前偏好",
     todayTotal: "今日累计",
     streak: "连续天数",
-    totalCompleted: "累计完成",
-    averageSession: "平均每组",
-    completedSessions: "完成组数",
-    abandonedSessions: "放弃记录",
     editPreferences: "修改长期偏好",
-    exportNotice:
-      "数据仅保存在你的设备浏览器中。我们不会自动收集你的运动记录。如你愿意参与测试，请点击导出 CSV/JSON，并发送给研究者/产品方。",
-    exportCsv: "导出 CSV",
-    exportJson: "导出 JSON",
-    historyTitle: "历史记录",
-    emptyHistory: "还没有完成记录。完成一组后，这里会显示日期、时长和重点部位。",
-    completedBadge: "已完成",
-    sourceLabels: {
-      home_recommendation: "首页推荐",
-      exercise_library: "动作库"
-    },
-    replayCompleted: "播放此组",
-    abandonedTitle: "中断记录",
-    emptyAbandoned: "暂时没有中断记录。退出未完成的 session 时，这里会显示已完成时长和退出位置。",
-    abandonedBadge: "未完成",
-    donePrefix: "已做",
-    stoppedAt: (index: number) => `停在第 ${index} 个`,
-    replayPlan: "播放原计划"
+    cumulativeDays: "累计运动",
+    preferencesAndRecords: "偏好",
+    settings: "偏好设置",
+    reminder: "提醒",
+    addWidget: "增加桌面小组件",
+    widgetMessage: "增加桌面组件之后，打断久坐的概率会提高 50% 哦",
+    soundAndVibration: "声音与振动",
+    music: "音乐",
+    vibration: "振动"
+  },
+  preview: {
+    title: "本次动作组",
+    totalDuration: "总时长",
+    editMovements: "修改动作",
+    addMovement: "增加动作",
+    save: "保存为我的动作组",
+    saved: "已保存到我的动作组",
+    saveChanges: "保存修改",
+    changesSaved: "修改已保存",
+    deleteGroup: "删除动作组",
+    start: "开始跟练"
+  },
+  reminder: {
+    title: "拉伸提醒",
+    subtitle: "在你选择的时间提醒",
+    times: "提醒时间",
+    addTime: "添加时间",
+    gentleNote: "提醒会按具体时间保存在此设备。Web 原型不发送系统后台通知。",
+    save: "保存提醒设置"
   }
 } as const;

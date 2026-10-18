@@ -19,6 +19,19 @@ export type Preferences = {
 
 export type LikedExerciseGroups = Record<string, string>;
 
+export type ReminderSettings = {
+  enabled: boolean;
+  times: string[];
+};
+
+export type SavedMovementGroup = {
+  id: string;
+  name: string;
+  exerciseIds: string[];
+  durations: number[];
+  savedAt: string;
+};
+
 export type RecommendationHistory = {
   lastSessionFirstExerciseId?: string;
   lastSessionExerciseIds?: string[];
@@ -69,6 +82,13 @@ export type AppView =
   | { name: "temporary" }
   | { name: "edit-preferences"; returnTo: "home" | "profile" }
   | { name: "library-detail"; groupId: string }
+  | {
+      name: "session-preview";
+      session: SessionPlan;
+      savedGroupId?: string;
+      savedGroupName?: string;
+    }
+  | { name: "reminder-settings" }
   | { name: "player"; session: SessionPlan }
   | {
       name: "completion";

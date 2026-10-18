@@ -24,24 +24,38 @@ export function formatCsvDuration(sec: number) {
   return `${Math.round((sec / 60) * 10) / 10}分钟`;
 }
 
+export function isValidCompletedSession(session: CompletedSession) {
+  return Boolean(
+    session.plannedDurationSec > 0 &&
+    session.actualCompletedSec >= session.plannedDurationSec &&
+    session.movementCount > 0 &&
+    session.exerciseIds.length === session.movementCount
+  );
+}
+
 export function todayTotalSec(sessions: CompletedSession[]) {
   const today = localDateString();
   return sessions
-    .filter((session) => session.date === today)
+    .filter((session) => session.date === today && isValidCompletedSession(session))
     .reduce((sum, session) => sum + session.actualCompletedSec, 0);
 }
 
 export function totalCompletedSec(sessions: CompletedSession[]) {
-  return sessions.reduce((sum, session) => sum + session.actualCompletedSec, 0);
+  return sessions
+    .filter(isValidCompletedSession)
+    .reduce((sum, session) => sum + session.actualCompletedSec, 0);
 }
 
 export function averageCompletedSec(sessions: CompletedSession[]) {
-  if (!sessions.length) return 0;
-  return Math.round(totalCompletedSec(sessions) / sessions.length);
+  const validSessions = sessions.filter(isValidCompletedSession);
+  if (!validSessions.length) return 0;
+  return Math.round(totalCompletedSec(validSessions) / validSessions.length);
 }
 
 export function calculateStreak(sessions: CompletedSession[]) {
-  const completedDates = new Set(sessions.map((session) => session.date));
+  const completedDates = new Set(
+    sessions.filter(isValidCompletedSession).map((session) => session.date)
+  );
   let cursor = new Date();
   let streak = 0;
 

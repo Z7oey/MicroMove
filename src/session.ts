@@ -160,7 +160,7 @@ function storablePreferences(preferences: SessionPreferences): SessionPlan["pref
 }
 
 export function generateSession(preferences: SessionPreferences): SessionPlan {
-  const desiredCount = Math.max(1, Math.floor(preferences.sessionDurationSec / 30));
+  const desiredCount = Math.max(1, Math.floor(preferences.sessionDurationSec / 15));
   const safeTargets: TargetArea[] = preferences.targetAreas.length
     ? preferences.targetAreas
     : ["肩颈"];
@@ -301,7 +301,7 @@ export function createAbandonedSession(
   const now = new Date();
   const completedMovementCount = Math.min(
     plan.exercises.length,
-    Math.floor(actualCompletedSec / 30)
+    Math.floor(actualCompletedSec / 15)
   );
 
   return {

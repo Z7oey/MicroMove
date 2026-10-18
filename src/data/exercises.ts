@@ -45,7 +45,7 @@ export const exercises: Exercise[] = [
       "肩膀保持放松，以轻微拉伸感为宜。",
       "出现疼痛、麻木或头晕时，及时停止动作。"
     ],
-    duration: 30,
+    duration: 15,
     posture: "坐姿/站姿",
     space: "小空间",
     intensity: "温和",
@@ -68,7 +68,7 @@ export const exercises: Exercise[] = [
       "肩膀保持放松，以轻微拉伸感为宜。",
       "出现疼痛、麻木或头晕时，及时停止动作。"
     ],
-    duration: 30,
+    duration: 15,
     posture: "坐姿/站姿",
     space: "小空间",
     intensity: "温和",
@@ -91,7 +91,7 @@ export const exercises: Exercise[] = [
       "颈部已有明显疼痛或活动受限时，减小幅度并谨慎尝试。",
       "出现疼痛、麻木或头晕时，及时停止动作。"
     ],
-    duration: 30,
+    duration: 15,
     posture: "坐姿/站姿",
     space: "小空间",
     intensity: "温和",
@@ -114,7 +114,7 @@ export const exercises: Exercise[] = [
       "动作幅度以颈部舒适为准。",
       "出现头晕、刺痛或前颈不适时，及时停止动作。"
     ],
-    duration: 30,
+    duration: 15,
     posture: "坐姿/站姿",
     space: "小空间",
     intensity: "温和",
@@ -137,7 +137,7 @@ export const exercises: Exercise[] = [
       "背部不适时，减小前推和拱背幅度。",
       "以肩胛骨之间出现轻微牵拉感为宜。"
     ],
-    duration: 30,
+    duration: 15,
     posture: "坐姿/站姿",
     space: "小空间",
     intensity: "温和",
@@ -160,7 +160,7 @@ export const exercises: Exercise[] = [
       "肩部不适时，减小抱背和拱背幅度。",
       "以感到上背轻微牵拉为宜。"
     ],
-    duration: 30,
+    duration: 15,
     posture: "坐姿/站姿",
     space: "小空间",
     intensity: "温和",
@@ -183,7 +183,7 @@ export const exercises: Exercise[] = [
       "肩部疼痛时，减小手臂横拉幅度。",
       "以肩后侧出现轻微牵拉感为宜。"
     ],
-    duration: 30,
+    duration: 15,
     posture: "坐姿/站姿",
     space: "小空间",
     intensity: "温和",
@@ -206,7 +206,7 @@ export const exercises: Exercise[] = [
       "肩部疼痛时，减小手臂横拉幅度。",
       "以肩后侧出现轻微牵拉感为宜。"
     ],
-    duration: 30,
+    duration: 15,
     posture: "坐姿/站姿",
     space: "小空间",
     intensity: "温和",
@@ -229,7 +229,7 @@ export const exercises: Exercise[] = [
       "手肘在舒适范围内打开，颈部保持自然。",
       "以胸口和上背轻微展开为宜。"
     ],
-    duration: 30,
+    duration: 15,
     posture: "坐姿/站姿",
     space: "小空间",
     intensity: "温和",
@@ -252,7 +252,7 @@ export const exercises: Exercise[] = [
       "避免耸肩或憋气。",
       "以肩背和躯干出现轻微延展感为宜。"
     ],
-    duration: 30,
+    duration: 15,
     posture: "坐姿/站姿",
     space: "小空间",
     intensity: "温和",
@@ -275,7 +275,7 @@ export const exercises: Exercise[] = [
       "避免耸肩或憋气。",
       "以肩背和躯干出现轻微延展感为宜。"
     ],
-    duration: 30,
+    duration: 15,
     posture: "坐姿/站姿",
     space: "小空间",
     intensity: "温和",
@@ -298,7 +298,7 @@ export const exercises: Exercise[] = [
       "打开胸口时，避免通过向前顶腰来增加幅度。",
       "肩部疼痛时，减小手臂后伸幅度。"
     ],
-    duration: 30,
+    duration: 15,
     posture: "坐姿/站姿",
     space: "小空间",
     intensity: "温和",
@@ -321,7 +321,7 @@ export const exercises: Exercise[] = [
       "侧弯幅度以身体舒适为准。",
       "出现腰背疼痛或头晕时，及时停止动作。"
     ],
-    duration: 30,
+    duration: 15,
     posture: "坐姿/站姿",
     space: "小空间",
     intensity: "温和",
@@ -344,7 +344,7 @@ export const exercises: Exercise[] = [
       "侧弯幅度以身体舒适为准。",
       "出现腰背疼痛或头晕时，及时停止动作。"
     ],
-    duration: 30,
+    duration: 15,
     posture: "坐姿/站姿",
     space: "小空间",
     intensity: "温和",
@@ -367,7 +367,7 @@ export const exercises: Exercise[] = [
       "转身和侧弯幅度以身体舒适为准。",
       "出现腰背疼痛或头晕时，及时停止动作。"
     ],
-    duration: 30,
+    duration: 15,
     posture: "坐姿/站姿",
     space: "小空间",
     intensity: "温和",
@@ -390,7 +390,7 @@ export const exercises: Exercise[] = [
       "转身和侧弯幅度以身体舒适为准。",
       "出现腰背疼痛或头晕时，及时停止动作。"
     ],
-    duration: 30,
+    duration: 15,
     posture: "坐姿/站姿",
     space: "小空间",
     intensity: "温和",
@@ -413,7 +413,7 @@ export const exercises: Exercise[] = [
       "出现明显腰痛、腿麻或头晕时，及时停止动作。",
       "以腰背出现轻微牵拉感为宜。"
     ],
-    duration: 30,
+    duration: 15,
     posture: "坐姿/站姿",
     space: "小空间",
     intensity: "温和",
